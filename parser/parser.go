@@ -30,7 +30,8 @@ func parseHeader(header string) map[string]string {
 
 	headerKeyVal := make(map[string]string)
 	for _, v := range headerItems {
-		headerSplit := strings.Split(v, ":")
+		headerSplit := strings.Split(v, ": ")
+
 		if len(headerSplit) < 2 {
 			fmt.Print("Invalid header")
 			os.Exit(1)

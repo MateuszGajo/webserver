@@ -3,8 +3,14 @@ package server
 import (
 	"fmt"
 	"net"
-	. "webserver/http"
-	. "webserver/parser"
+	"webserver/http"
+	"webserver/parser"
+)
+
+type RequestHeaderField string
+
+const (
+	CONNECTION RequestHeaderField = "Connection"
 )
 
 func RunServer(address, port string) {
@@ -24,7 +30,7 @@ func RunServer(address, port string) {
 			continue
 		}
 
-		handleConnection(conn)
+		go handleConnection(conn)
 	}
 
 }
@@ -37,19 +43,27 @@ func handleConnection(conn net.Conn) {
 			fmt.Printf("Problem with closing connectin, err: %v", err)
 		}
 	}(conn)
+	for {
 
-	buf := make([]byte, 2048)
+		buf := make([]byte, 2048)
 
-	n, err := conn.Read(buf)
+		n, err := conn.Read(buf)
 
-	if err != nil {
-		fmt.Printf("problem reading data, %v", err)
+		if err != nil {
+			fmt.Printf("problem reading data, %v", err)
+			return
+		}
+
+		msg := string(buf[:n])
+
+		resp := parser.ParseRequest(msg)
+
+		http.RunHandler(resp.RequestLine.Path, resp.RequestLine.ReqType, conn)
+
+		if val, ok := resp.Headers[string(CONNECTION)]; !ok || val != "keep-alive" {
+			return
+		}
+
 	}
-
-	msg := string(buf[:n])
-
-	resp := ParseRequest(msg)
-
-	RunHandler(resp.RequestLine.Path, resp.RequestLine.ReqType, conn)
 
 }
