@@ -81,17 +81,27 @@ func parseContentApplicationJson(data string) map[string]interface{} {
 
 func ParseRequest(request string) RequestDetails {
 	index := strings.Index(request, "\r\n")
+	if index == -1 || len(request) < index+len("\r\n") {
+		fmt.Print("can't convert request line")
+		return RequestDetails{}
+	}
 	requestLine := request[:index+len("\r\n")]
+	requestLineParsed := parseRequestLine(requestLine)
 
 	request = request[index+len("\r\n"):]
 	index = strings.Index(request, "\r\n\r\n")
+
+	if index == -1 || len(request) < index+len("\r\n\r\n") {
+		fmt.Print("can't convert header")
+		return RequestDetails{
+			RequestLine: requestLineParsed,
+		}
+	}
 
 	headersData := request[:index+len("\r\n\r\n")]
 	headers := parseHeader(headersData)
 
 	content := request[index+len("\r\n\r\n"):]
-
-	requestLineParsed := parseRequestLine(requestLine)
 
 	return RequestDetails{
 		RequestLine: requestLineParsed,

@@ -5,6 +5,18 @@ import (
 	"webserver/http"
 )
 
+func TestParseOnlyRequestLine(t *testing.T) {
+	req := "GET / HTTP/1.1\r\n" +
+		"\r\n"
+
+	resp := ParseRequest(req)
+
+	if len(resp.Headers) != 0 || len(resp.Content) != 0 {
+		t.Fatalf("Header and content should be empty, insted we got: %q, :%q", resp.Headers, resp.Content)
+	}
+
+}
+
 func TestParseRequest(t *testing.T) {
 	req := "GET / HTTP/1.1\r\n" +
 		"Accept: */*\r\n" +
