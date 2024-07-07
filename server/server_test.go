@@ -1,24 +1,43 @@
 package server
 
 import (
+	"fmt"
 	"net"
 	"sync"
 	"testing"
 	"time"
+	"webserver/http"
 )
 
-func TestShouldKeepAlive(t *testing.T) {
+func CleanUp(conn net.Conn, server *Server) {
+	err := conn.Close()
 
+	if err != nil {
+		fmt.Printf("Problem with closing connection, %v", err)
+	}
+
+	server.CloseServer()
+}
+
+func StartWebServer(options ...ServerOptions) *Server {
 	var wg sync.WaitGroup
+	var server *Server
 
 	wg.Add(1)
 
 	go func() {
+		server = CreateServer(options...)
 		wg.Done()
-		RunServer("127.0.0.1", "4221")
+		server.RunServer()
 	}()
 
 	wg.Wait()
+
+	return server
+}
+
+func TestShouldKeepAlive(t *testing.T) {
+	server := StartWebServer()
 
 	conn, err := net.Dial("tcp", "127.0.0.1:4221")
 
@@ -42,20 +61,12 @@ func TestShouldKeepAlive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connection should be open, we got err: %v", err)
 	}
+
+	defer CleanUp(conn, server)
 }
 
 func TestCloseConectionAfterRequest(t *testing.T) {
-
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-
-	go func() {
-		wg.Done()
-		RunServer("127.0.0.1", "4221")
-	}()
-
-	wg.Wait()
+	server := StartWebServer()
 
 	conn, err := net.Dial("tcp", "127.0.0.1:4221")
 
@@ -78,23 +89,15 @@ func TestCloseConectionAfterRequest(t *testing.T) {
 	if err == nil {
 		t.Fatalf("connection should be closed, we got err: %v", err)
 	}
-
+	defer CleanUp(conn, server)
 }
-
-// Hardcoded timeout 5 seconds
 
 func TestCloseConectionAfterTimeout(t *testing.T) {
 
-	var wg sync.WaitGroup
+	timeoutSec := 1
+	propgatationDelayS := 0.1
 
-	wg.Add(1)
-
-	go func() {
-		wg.Done()
-		RunServer("127.0.0.1", "4221")
-	}()
-
-	wg.Wait()
+	server := StartWebServer(WithHeader(http.KEEP_ALIVE, fmt.Sprintf("timeout=%v", timeoutSec)))
 
 	conn, err := net.Dial("tcp", "127.0.0.1:4221")
 
@@ -113,12 +116,12 @@ func TestCloseConectionAfterTimeout(t *testing.T) {
 		t.Fatalf("connection should be open, we got err: %v", err)
 	}
 
-	time.Sleep(6 * time.Second)
+	time.Sleep((time.Duration(timeoutSec*1000) + time.Duration(propgatationDelayS*1000)) * time.Millisecond)
 
 	conn.Write([]byte(req))
 	_, err = conn.Read(buff)
 	if err == nil {
 		t.Fatalf("connection should be closed, we got err: %v", err)
 	}
-
+	defer CleanUp(conn, server)
 }

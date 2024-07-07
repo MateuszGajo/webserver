@@ -1,10 +1,14 @@
 package main
 
 import (
+	"webserver/http"
 	"webserver/server"
 )
 
 func main() {
-	server.RunServer("127.0.0.1", "4221")
+	http.Cors("http://localhost:5501")
+
+	server := server.CreateServer()
+	server.RunServer()
 
 }

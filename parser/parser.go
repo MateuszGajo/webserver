@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"webserver/http"
 )
 
 type RequestLine struct {
@@ -18,12 +19,6 @@ type RequestDetails struct {
 	Headers     map[string]string
 	Content     map[string]interface{}
 }
-
-type ContentType string
-
-const (
-	APPLICATION_JSON ContentType = "application/json"
-)
 
 func parseHeader(header string) map[string]string {
 	headerItems := strings.Split(header[:len(header)-(len("\r\n")*2)], "\r\n")
@@ -52,9 +47,9 @@ func parseRequestLine(msg string) RequestLine {
 	}
 }
 
-func parseContent(contentType ContentType, data string) map[string]interface{} {
+func parseContent(contentType http.ContentType, data string) map[string]interface{} {
 	switch contentType {
-	case APPLICATION_JSON:
+	case http.APPLICATION_JSON:
 		return parseContentApplicationJson(data)
 	default:
 		return parseContentApplicationJson(data)
@@ -106,6 +101,6 @@ func ParseRequest(request string) RequestDetails {
 	return RequestDetails{
 		RequestLine: requestLineParsed,
 		Headers:     headers,
-		Content:     parseContent(ContentType(headers["Content-Type"]), content),
+		Content:     parseContent(http.ContentType(headers["Content-Type"]), content),
 	}
 }
