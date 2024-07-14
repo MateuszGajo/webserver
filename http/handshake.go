@@ -1,5 +1,10 @@
 package http
 
+import (
+	"fmt"
+	"net"
+)
+
 // SSL 3.0
 
 // 1. Fragmentation, block goes int o sslplaintext
@@ -190,3 +195,150 @@ const (
 	// fortezza tokens used in the highly secure env such as goverment
 	//
 )
+
+func handleConnection(conn net.Conn) {
+	defer conn.Close()
+
+	// Step 3: Receive Client Hello
+	clientHello := make([]byte, 1024)
+	n, err := conn.Read(clientHello)
+	if err != nil {
+		fmt.Println("Error reading Client Hello:", err)
+		return
+	}
+
+	contentType := clientHello[0]
+	if contentType == byte(TLSContentTypeHandshake) {
+		majorVersion := clientHello[1]
+		minorVersion := clientHello[2]
+		recordLength := clientHello[3:5]
+		// record length is only 2 bytes while handshake can be 3 bytes, when that happend two request are transmited and reasmbled into one
+		handshakeMessageType := TLSHandshakeMessageType(clientHello[5])
+
+		if handshakeMessageType == TLSHandshakeMessageClinetHello {
+			// client hello
+			handshakeLength := clientHello[6:8]
+			clientVersion := clientHello[8:9] // backward compability, used to dicated which version to use, now there is set in protocol version and newest one is chosen.
+
+			//client random
+			radnomBytesTime := clientHello[9:13]
+			radnomBytesData := clientHello[13:45]
+			//session id
+			session := clientHello[45]
+			//cipher suites
+			cipherSuite := clientHello[45:47]
+			if cipherSuite[0] == 255 {
+				//
+				//    Note: All cipher suites whose first byte is 0xFF are considered
+				//    private and can be used for defining local/experimental algorithms.
+				//    Interoperability of such types is a local matter.
+			} else {
+				// other encryptions
+			}
+			// compression mehod
+			compressionMethod := clientVersion[47:48]
+			//estinsl ength
+			//extentsion server name
+			// extenstion status request
+			//extenstion supported grops
+			//extenstion ec points format
+			//extension singing algorithm
+			//extension renogotation info
+			//extension sct
+		}
+
+	} else if contentType == byte(TLSContentTypeAlert) {
+		majorVersion := clientHello[1]
+		minorVersion := clientHello[2]
+		length := clientHello[3:4]
+		alertLevel := TlSAlertLevel(clientHello[5])
+		alertDescription := TLSAlertDescription(clientHello[6])
+
+		switch alertDescription {
+		case TLSAlertDescriptionCloseNotify:
+			// The connection is closing or has been closed gracefully, no action needed
+			conn.Close()
+		case TLSAlertDescriptionUnexpectedMessage:
+			// Do Retry, bad message recive, long term problem can indicate protocol mismatch(client expecting e.g tls 1.2 and server sending 1.3), incorrect squence or error in
+			fmt.Print("Unexpected message, Retry connectin again, if problem persist, check configuration")
+
+		case TLSAlertDescriptionBadRecordMac:
+			// A message auhentication code (MAC) check failed, check your connection, can indicate server problem or an attack
+			// Always fatal
+			fmt.Print("MAC failed, check your connection")
+		case TLSAlertDescriptionDecompressionFailure:
+			// The compression function recived wrong input, mostly indicated corrupted message, decompression methods such as lz77, works by sling a window over the input data to idientify repeted sequences. It replaces these sequences with references to earlier occurances of the same sequence.
+			// Lookahed bufer a samaller buffer within the window that scans for the longer match of the current input string.
+			// Match an literal: if match is found it is encoded a tuple (distnace, length)
+			//
+			// Window	Lookahead	Output
+			// a		bracadabra	Literal a
+			// ab		racadabra	Literal b
+			// abr		acadabra	Literal r
+			// abra		cadabra		Literal a
+			// abrac	adabra		(4, 1) (back 4, length 1)
+			// abracad	abra		(7, 4) (back 7, length 4)
+			fmt.Print("Can't decompress data, could be corrupted input")
+		case TLSAlertDescriptionHandshakeFailure:
+			// Handshake process failed, ensure that server and browser supports required protocol and ciphers, may indicate problem with server configuration
+			// Always fatal
+			fmt.Print("Handshake failure, make sure choose procol and ciphers are supported by both partied")
+		case TLSAlertDescriptionNoCertificate:
+			// No certificate was provided by the peer
+			// Optional field
+			fmt.Print("No certificate provided")
+		case TLSAlertDescriptionBadCertificate:
+			// Bad certificate
+			fmt.Print("Make sure that provided cerificate is valid")
+		case TLSAlertDescriptionUnsupportedCertificate:
+			// The certificate is unsported:
+			// 1. Invalid certificate type, e.g server can only accept x5.09 certificated
+			// 2. Unrecgonized cerrtificate Authority
+			// 3. Certificate algorithm issue, its not supported by peers
+			// 4. Certificate version its not supported
+			fmt.Print("Unsported certificated, make sure both parties support the type, issuer, version and both known authority")
+		case TLSAlertDescriptionCertificateRevoked:
+			// Cerificate was revoke
+			fmt.Print("Certificate revoked")
+		case TLSAlertDescriptionCertificateExpired:
+			// Cerificated expired
+			fmt.Print("Certificate expiered")
+		case TLSAlertDescriptionCertificateUnknown:
+			// 1. Unknown certificate
+			// 2. Untrusted CA
+			// 3. Incomplete Certificate chain, presented certifiacted does not include a complate chain to trsuted root CA
+			// 4. Revoked or expired
+			// 5. Malformed or corrupted
+			// 6. Mimstached purpose, doesnt have appropriate extention
+			// 7. Expired trust store
+			fmt.Print("Unknown certificate, check CA authority, trust store, extenstion compability or maybe its coruppted data")
+		case TLSAlertDescriptionIllegalParameter:
+			// Paramters not allowed or recognized:
+			// 1. Invalid cipher suite, not implmented by one of the parties
+			// 2. Not supported tls version
+			// 3. Incorrected exntesion
+			// 4. Invalid message structure
+			fmt.Print("Illegal paramters, check tls version, supported protcol, extenstion or message structure")
+
+		default:
+			fmt.Printf("Unregonized alert occured: %v", alertDescription)
+		}
+
+		if alertLevel == TLSAlertLevelfatal {
+			conn.Close()
+			return
+		}
+
+	} else if contentType == byte(TLSContentTypeChangeCipherSpec) {
+		// The change cipher spec message is sent by both the client and the server to notify the reciing part that subsequent record will be protected under the just-negotiated cipherspec and keys. Copy pending state into currnet.
+		// *When resuming a previous sessin, the change cipher spec message is sent after the hello
+		majorVersion := clientHello[1]
+		minorVersion := clientHello[2]
+		length := clientHello[3:4]
+		message := TLSCipherSpec(clientHello[5])
+		if message == TLSCipherSpecDefault {
+			fmt.Print("Sender is switching to new cipher :)")
+		}
+	}
+	fmt.Print(clientHello)
+}
