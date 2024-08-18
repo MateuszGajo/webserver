@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/des"
 	"crypto/md5"
+	"crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
 	"errors"
@@ -264,7 +265,6 @@ type ServerData struct {
 	shared           *big.Int
 	clientRandom     []byte
 	serverRandom     []byte
-	allMessages      [][]byte
 	allMessagesShort [][]byte
 	masterKey        []byte
 	macClient        []byte
@@ -323,7 +323,7 @@ func computeSharedSecret(publicKey, privateKey, p *big.Int) *big.Int {
 	return sharedSecret
 }
 
-func generate_finished_message_md5(masterSecret, sender []byte, handshakeMessages, handskaeMessagesShort [][]byte, pad1, pad2 byte) []byte {
+func generate_finished_message_md5(masterSecret, sender []byte, handshakeMessages [][]byte, pad1, pad2 byte) []byte {
 	n := 16
 	npad := (48 / n) * n
 	hashMD5 := md5.New()
@@ -338,7 +338,7 @@ func generate_finished_message_md5(masterSecret, sender []byte, handshakeMessage
 
 	allHandskaedMessageCombined := []byte{}
 
-	for _, v := range handskaeMessagesShort {
+	for _, v := range handshakeMessages {
 		allHandskaedMessageCombined = append(allHandskaedMessageCombined, v...)
 	}
 
@@ -358,7 +358,7 @@ func generate_finished_message_md5(masterSecret, sender []byte, handshakeMessage
 
 	return hashMD5.Sum(nil)
 }
-func generate_finished_message_sha1(masterSecret, sender []byte, handshakeMessages, handskaeMessagesShort [][]byte, pad1, pad2 byte) []byte {
+func generate_finished_message_sha1(masterSecret, sender []byte, handshakeMessages [][]byte, pad1, pad2 byte) []byte {
 	n := 20
 	npad := (48 / n) * n
 	hashSHA1 := sha1.New()
@@ -373,7 +373,7 @@ func generate_finished_message_sha1(masterSecret, sender []byte, handshakeMessag
 
 	allHandskaedMessageCombined := []byte{}
 
-	for _, v := range handskaeMessagesShort {
+	for _, v := range handshakeMessages {
 		allHandskaedMessageCombined = append(allHandskaedMessageCombined, v...)
 	}
 
@@ -457,7 +457,7 @@ func encrypt3DESCBC(key, iv, ciphertext []byte) ([]byte, error) {
 	return encrypted, nil
 }
 
-func generateStreamCipher(serverData ServerData, writeSecret, sslCompressData []byte) []byte {
+func generateStreamCipher(writeSecret, sslCompressData []byte) []byte {
 	//
 	// 	 hash(MAC_write_secret + pad_2 +
 	// 		hash(MAC_write_secret + pad_1 + seq_num +
@@ -538,485 +538,65 @@ func removeCustomPadding(src []byte, blockSize int) ([]byte, error) {
 	return src[:len(src)-paddingLen], nil
 }
 
+func decryptMessage(recordLayerData []byte, encryptedData []byte, serverData *ServerData) []byte {
+	encryptedMessage := encryptedData
+
+	decodedMsg, err := decrypt3DESCBC(serverData.writeKeyClient, serverData.IVClient, encryptedMessage)
+	if err != nil {
+		fmt.Println("problem decrypting data")
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	decodedMsgWithoutPadding, err := removeCustomPadding(decodedMsg, 64)
+	if err != nil {
+		fmt.Println("problem removing padding")
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	decryptedClientHello := recordLayerData
+	decryptedClientHello = append(decryptedClientHello, decodedMsgWithoutPadding...)
+
+	return decryptedClientHello
+}
+
 func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) []byte {
 	contentType := clientHello[0]
+
+	version := binary.BigEndian.Uint16(clientHello[1:3])
+	recordLength := binary.BigEndian.Uint16(clientHello[3:5])
+	fmt.Print("lets go handshake content type \n")
+	fmt.Println(recordLength)
+	switch version {
+	case 0x0200:
+		fmt.Print("SSL 2.0")
+	case 0x0300:
+		fmt.Print("SSL 3.0")
+	}
+	// record length is only 2 bytes while handshake can be 3 bytes, when that happend two request are transmited and reasmbled into one
+
+	if serverData.isEncrypted {
+		decryptedData := decryptMessage(clientHello[:5], clientHello[5:], serverData)
+		fmt.Println("decrypted client hello")
+		fmt.Println(decryptedData)
+		fmt.Println("decrypted client hex")
+
+		for _, v := range decryptedData {
+			fmt.Printf(" %02X", v)
+		}
+
+	}
+
+	serverData.allMessagesShort = append(serverData.allMessagesShort, clientHello[5:5+recordLength])
+
 	if contentType == byte(TLSContentTypeHandshake) {
-		version := binary.BigEndian.Uint16(clientHello[1:3])
-		recordLength := binary.BigEndian.Uint16(clientHello[3:5])
-		// fmt.Println("server data")
-		// fmt.Println(serverData)
-		fmt.Print("lets go handshake content type \n")
-		fmt.Println(recordLength)
-		switch version {
-		case 0x0200:
-			fmt.Print("SSL 2.0")
-		case 0x0300:
-			fmt.Print("SSL 3.0")
-		}
-		// record length is only 2 bytes while handshake can be 3 bytes, when that happend two request are transmited and reasmbled into one
-
-		if serverData.isEncrypted {
-
-			encryptedMessage := clientHello[5:]
-			// pad1 := byte(0x36)
-			// pad2 := byte(0x5c)
-			// clientBytes := []byte{0x43, 0x4C, 0x4E, 0x54}
-
-			// clientVerifyHash := []byte{}
-
-			// md5Hash := generate_finished_message_md5(serverData.masterKey, clientBytes, serverData.allMessages, serverData.allMessagesShort, pad1, pad2)
-			// shaHash := generate_finished_message_sha1(serverData.masterKey, clientBytes, serverData.allMessages, serverData.allMessagesShort, pad1, pad2)
-
-			// clientVerifyHash = append(clientVerifyHash, md5Hash...)
-			// clientVerifyHash = append(clientVerifyHash, shaHash...)
-
-			// fmt.Println("\nhash")
-			// for _, b := range clientVerifyHash {
-			// 	fmt.Printf(" %02X", b)
-			// }
-
-			// hashAndHeader := []byte{20, 0, 0, 36}
-			// hashAndHeader = append(hashAndHeader, clientVerifyHash...)
-			// fmt.Println("hash and header len")
-			// fmt.Println(len(hashAndHeader))
-
-			// streamCipher := generateStreamCipher(*serverData, serverData.macClient, hashAndHeader)
-			// fmt.Println("moment of the truth, what is a stream cipher!!!")
-			// for _, b := range streamCipher {
-			// 	fmt.Printf(" %02X", b)
-			// }
-
-			// combinedBytes := []byte{}
-			// combinedBytes = append(combinedBytes, hashAndHeader...)
-			// combinedBytes = append(combinedBytes, streamCipher...)
-
-			// paddd := addCustomPadding(combinedBytes, 64)
-
-			fmt.Println("lets try decode message")
-			fmt.Println("message encrypted")
-			fmt.Println(encryptedMessage)
-			for _, b := range encryptedMessage {
-				fmt.Printf(" %02X", b)
-			}
-
-			decodedMsg, err := decrypt3DESCBC(serverData.writeKeyClient, serverData.IVClient, encryptedMessage)
-			if err != nil {
-				fmt.Println("problem decrypting data")
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			decodedMsgWithoutPadding, err := removeCustomPadding(decodedMsg, 64)
-			if err != nil {
-				fmt.Println("problem removing padding")
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			fmt.Println("message decrypted")
-			// fmt.Println(decodedMsg)
-			for _, b := range decodedMsg {
-				fmt.Printf(" %02X", b)
-			}
-			fmt.Println("message decrypted no padding")
-			// fmt.Println(decodedMsg)
-			for _, b := range decodedMsgWithoutPadding {
-				fmt.Printf(" %02X", b)
-			}
-			decryptedClientHello := clientHello[:5]
-			decryptedClientHello = append(decryptedClientHello, decodedMsgWithoutPadding...)
-			fmt.Println("decrypted client hello")
-			fmt.Println(decryptedClientHello)
-
-		} else {
-
-			serverData.allMessages = append(serverData.allMessages, clientHello[:5+recordLength])
-
-			serverData.allMessagesShort = append(serverData.allMessagesShort, clientHello[5:5+recordLength])
-			fmt.Println(serverData.allMessagesShort[0])
-		}
-		handshakeMessageType := TLSHandshakeMessageType(clientHello[5])
-
-		if handshakeMessageType == TLSHandshakeMessageClinetHello {
-
-			// client hello
-			// handshakeLength := int32(clientHello[6])<<16 | int32(clientHello[7])<<8 | int32(clientHello[8])
-
-			clientVersion := binary.BigEndian.Uint16(clientHello[9:11]) // backward compability, used to dicated which version to use, now there is set in protocol version and newest one is chosen.
-
-			switch clientVersion {
-			case 0x0200:
-				fmt.Print("CLient version: SSL 2.0")
-			case 0x0300:
-				fmt.Print("Client version: SSL 3.0")
-			}
-
-			//client random
-			fmt.Println(clientHello[11:15])
-			radnomBytesTime := binary.BigEndian.Uint32(clientHello[11:15])
-			radnomBytesData := clientHello[15:43]
-			serverData.clientRandom = clientHello[11:43]
-
-			fmt.Println("Unix time")
-			fmt.Println(time.Unix(int64(radnomBytesTime), 0))
-			fmt.Println("random bytes")
-			fmt.Println(radnomBytesData)
-			//session id
-			// session := clientHello[43]
-
-			//cipher suites
-			// cipherSuiteLength := binary.BigEndian.Uint16(clientHello[44:46])
-			// cipherSuites := clientHello[46 : 46+cipherSuiteLength]
-
-			if clientHello[44] == 255 {
-				//
-				//    Note: All cipher suites whose first byte is 0xFF are considered
-				//    private and can be used for defining local/experimental algorithms.
-				//    Interoperability of such types is a local matter.
-			} else {
-				// other encryptions
-			}
-			// compression mehod
-			// compressionMethod := clientHello[46+cipherSuiteLength]
-
-			// resp := []byte{22, 3, 0, 0, 97, 1, 0, 0, 93, 3, 0, 102, 148, 24, 139, 18, 154, 166, 132, 148, 50, 159, 114, 19, 36, 91, 200, 11, 50, 160, 84, 233, 119, 112, 182, 105, 221, 103, 32, 196, 234, 12, 237, 0, 0, 54, 1, 0}
-
-			// fmt.Println("we sending")
-			// fmt.Println(resp)
-
-			// n, err = conn.Write(resp)
-			// if err != nil {
-			// 	fmt.Println("Error reading Client Hello:", err)
-			// 	return
-			// }
-
-			// resp := []byte{22, 3, 0, 0, 42, 2, 0, 0, 38, 3, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 0, 0, 47, 0, 22, 3, 0, 0}
-			// currentTime := time.Now()
-			// unixTime := currentTime.Unix()
-
-			// unitTimeBytes := int64ToBIgEndian(unixTime)
-			unitTimeBytes := []byte{102, 179, 193, 18}
-			// randomBytes := make([]byte, 28)
-			randomBytes := []byte{240, 176, 201, 208, 29, 146, 177, 211, 231, 219, 40, 174, 74, 66, 47, 112, 115, 119, 166, 218, 162, 228, 49, 219, 0, 0, 0, 0}
-
-			// _, err := rand.Read(randomBytes)
-
-			// if err != nil {
-			// 	fmt.Print("problem generating random bytes")
-			// }
-
-			type Resp struct {
-				contentType       byte
-				version           []byte
-				recordLength      []byte
-				handshakeType     byte
-				handshakeLength   []byte
-				protocolVersion   []byte
-				gmtUnixTime       []byte
-				serverRandom      []byte
-				sessionId         byte
-				cipherSuite       []byte
-				compressionMethod []byte
-			}
-
-			cipherSuite := []byte{0, 27}
-			compressionMethodd := []byte{0}
-			protocolVersion := []byte{3, 0}
-			sessionIdd := byte(0)
-			//                  time				random bytes	 session id cypher suit	  compression methodd
-			handshakeLengthh := len(unitTimeBytes) + len(randomBytes) + 1 + len(cipherSuite) + len(compressionMethodd) + len(protocolVersion)
-			handshakeLengthhByte, err := intTo3BytesBigEndian(handshakeLengthh)
-			recordLengthhByte := int32ToBIgEndian(handshakeLengthh + 4)
-			resppp := Resp{
-				contentType:       22,
-				version:           []byte{3, 0},
-				recordLength:      recordLengthhByte, //2 bytes
-				handshakeType:     2,
-				handshakeLength:   handshakeLengthhByte, //3 bytes,
-				protocolVersion:   protocolVersion,
-				gmtUnixTime:       unitTimeBytes,
-				serverRandom:      randomBytes,
-				sessionId:         sessionIdd,
-				cipherSuite:       cipherSuite,
-				compressionMethod: compressionMethodd,
-			}
-			serverRandom := []byte{102, 179, 193, 18, 240, 176, 201, 208, 29, 146, 177, 211, 231, 219, 40, 174, 74, 66, 47, 112, 115, 119, 166, 218, 162, 228, 49, 219, 0, 0, 0, 0}
-			// serverRandom = append(serverRandom, resppp.gmtUnixTime...)
-			// serverRandom = append(serverRandom, resppp.serverRandom...)
-			serverData.serverRandom = serverRandom
-			// copy(serverData.serverRandom, serverRandom)
-
-			respENd := []byte{resppp.contentType}
-			respENd = append(respENd, resppp.version...)
-			respENd = append(respENd, resppp.recordLength...)
-			respENd = append(respENd, resppp.handshakeType)
-			respENd = append(respENd, resppp.handshakeLength...)
-			respENd = append(respENd, resppp.protocolVersion...)
-			respENd = append(respENd, resppp.gmtUnixTime...)
-			respENd = append(respENd, resppp.serverRandom...)
-			respENd = append(respENd, resppp.sessionId)
-			respENd = append(respENd, resppp.cipherSuite...)
-			respENd = append(respENd, resppp.compressionMethod...)
-
-			_, err = conn.Write(respENd)
-			serverData.allMessages = append(serverData.allMessages, respENd)
-			serverData.allMessagesShort = append(serverData.allMessagesShort, respENd[5:])
-
-			if err != nil {
-				fmt.Println("Error reading Client Hello:", err)
-				return []byte{}
-			}
-
-			// Two bytes should be converted and checked
-			if cipherSuite[1] >= 23 && cipherSuite[1] <= 27 {
-				// anonmouys cipher we need to send server key exchange message all are dh
-				// 		enum { rsa, diffie_hellman, fortezza_kea }
-				// 		KeyExchangeAlgorithm;
-
-				//  struct {
-				// 	 opaque rsa_modulus<1..2^16-1>;
-				// 	 opaque rsa_exponent<1..2^16-1>;
-				//  } ServerRSAParams;
-				// struct {
-				// 	opaque dh_p<1..2^16-1>;
-				// 	opaque dh_g<1..2^16-1>;
-				// 	opaque dh_Ys<1..2^16-1>;
-				// } ServerDHParams;     /* Ephemeral DH parameters */
-
-				// struct {
-				// 	opaque r_s [128];
-				// } ServerFortezzaParams;
-				// enum { anonymous, rsa, dsa } SignatureAlgorithm;
-
-				// digitally-signed struct {
-				// 	select(SignatureAlgorithm) {
-				// 		case anonymous: struct { };
-				// 		case rsa:
-				// 			opaque md5_hash[16];
-				// 			opaque sha_hash[20];
-				// 		case dsa:
-				// 			opaque sha_hash[20];
-				// 	};
-				// } Signature;
-				// struct {
-				// 	select (KeyExchangeAlgorithm) {
-				// 		case diffie_hellman:
-				// 			ServerDHParams params;
-				// 			Signature signed_params;
-				// 		case rsa:
-				// 			ServerRSAParams params;
-				// 			Signature signed_params;
-				// 		case fortezza_kea:
-				// 			ServerFortezzaParams params;
-				// 	};
-				// } ServerKeyExchange;
-
-				pPrime, ok := new(big.Int).SetString("3", 16)
-				if !ok {
-					fmt.Println("Error generating private key:", err)
-					return []byte{}
-				}
-				gGenerator := big.NewInt(2)
-				serverPrivateVal, err := generatePrivateKey(pPrime)
-				if err != nil {
-					fmt.Println("Error generating private key:", err)
-					return []byte{}
-				}
-				serverPublicVal := computePublicKey(gGenerator, serverPrivateVal, pPrime)
-
-				serverData.p = pPrime
-				serverData.q = gGenerator
-				serverData.private = serverPrivateVal
-
-				a1 := pPrime.Bytes()     // p a large prime nmber
-				a2 := gGenerator.Bytes() // g a base used for generic public values
-				// p and g are public paramters, both parties need to know these paramters to perform the key exchange
-
-				a3 := serverPublicVal.Bytes() // Ys the server public key
-				// the server public key is essential for the client t ocompue the shared secre, the clients needs this value to compute its own private value
-
-				// to calcualte shared secret i need to clientPublic^serverPriavte mod p (pprime)
-
-				all := []byte{}
-				all = append(all, []byte{0, byte(len(a1))}...)
-				all = append(all, a1...)
-				all = append(all, []byte{0, byte(len(a2))}...)
-				all = append(all, a2...)
-				all = append(all, []byte{0, byte(len(a3))}...)
-				all = append(all, a3...)
-
-				handshakeLengthh := len(all)
-				handshakeLengthhByte, err := intTo3BytesBigEndian(handshakeLengthh)
-				if err != nil {
-					fmt.Print("err while converting to big endina")
-				}
-				recordLengthhByte := int32ToBIgEndian(handshakeLengthh + 4)
-
-				resppp := Resp{
-					contentType:     22,
-					version:         []byte{3, 0},
-					recordLength:    recordLengthhByte, //2 bytes
-					handshakeType:   12,
-					handshakeLength: handshakeLengthhByte, //3 bytes,
-				}
-
-				respENd := []byte{resppp.contentType}
-				respENd = append(respENd, resppp.version...)
-				respENd = append(respENd, resppp.recordLength...)
-				respENd = append(respENd, resppp.handshakeType)
-				respENd = append(respENd, resppp.handshakeLength...)
-				respENd = append(respENd, all...)
-
-				_, err = conn.Write(respENd)
-				serverData.allMessages = append(serverData.allMessages, respENd)
-				serverData.allMessagesShort = append(serverData.allMessagesShort, respENd[5:])
-				if err != nil {
-					fmt.Println("Error reading Client Hello:", err)
-					return []byte{}
-				}
-
-			}
-
-			resp := []byte{22, 3, 0, 0, 4, 14, 0, 0, 0}
-
-			_, err = conn.Write(resp)
-			serverData.allMessages = append(serverData.allMessages, resp)
-			serverData.allMessagesShort = append(serverData.allMessagesShort, resp[5:])
-			if err != nil {
-				fmt.Println("Error reading Client Hello:", err)
-				return []byte{}
-			}
-
-		} else if handshakeMessageType == TLSHandshakeMessageClientKeyExchange {
-
-			// handshakeLength := int32(clientHello[6])<<16 | int32(clientHello[7])<<8 | int32(clientHello[8])
-			clientPublicKeyLength := binary.BigEndian.Uint16(clientHello[9:11])
-			clientPublicKey := clientHello[11 : 11+clientPublicKeyLength]
-
-			for _, v := range serverData.allMessagesShort {
-				fmt.Println(v)
-			}
-
-			clinetPublicKeyInt := new(big.Int).SetBytes(clientPublicKey)
-
-			sharedSecret := computeSharedSecret(clinetPublicKeyInt, serverData.private, serverData.p)
-
-			masterKeySeed := []byte{}
-			keyBlockSeed := []byte{}
-			masterKeySeed = append(masterKeySeed, serverData.clientRandom...)
-
-			masterKeySeed = append(masterKeySeed, serverData.serverRandom...)
-
-			keyBlockSeed = append(keyBlockSeed, serverData.serverRandom...)
-			keyBlockSeed = append(keyBlockSeed, serverData.clientRandom...)
-
-			//Hardcoded for testing
-			masterKey := ssl_prf(sharedSecret.Bytes(), masterKeySeed, 48)
-			keyBlock := ssl_prf(masterKey, keyBlockSeed, 104)
-			macClient := keyBlock[0:20]
-			macServer := keyBlock[20:40]
-			writeKeyClient := keyBlock[40:64]
-			writeKeyServer := keyBlock[64:88]
-			IVClient := keyBlock[88:96]
-			IVServer := keyBlock[96:104]
-
-			serverData.macClient = macClient
-			serverData.macServer = macServer
-			serverData.writeKeyClient = writeKeyClient
-			serverData.writeKeyServer = writeKeyServer
-			serverData.IVClient = IVClient
-			serverData.IVServer = IVServer
-
-			serverData.masterKey = masterKey
-
-			serverData.shared = sharedSecret
-
-			return clientHello[11+clientPublicKeyLength:]
-
-		} else if handshakeMessageType == TLSHandshakeMessageFinished {
-
-		}
-
+		return handleHandshake(clientHello, serverData, conn)
 	} else if contentType == byte(TLSContentTypeAlert) {
-		// majorVersion := clientHello[1]
-		// minorVersion := clientHello[2]
-		// length := clientHello[3:4]
 		alertLevel := TlSAlertLevel(clientHello[5])
-		alertDescription := TLSAlertDescription(clientHello[6])
-
-		switch alertDescription {
-		case TLSAlertDescriptionCloseNotify:
-			// The connection is closing or has been closed gracefully, no action needed
-			conn.Close()
-		case TLSAlertDescriptionUnexpectedMessage:
-			// Do Retry, bad message recive, long term problem can indicate protocol mismatch(client expecting e.g tls 1.2 and server sending 1.3), incorrect squence or error in
-			fmt.Print("Unexpected message, Retry connectin again, if problem persist, check configuration")
-
-		case TLSAlertDescriptionBadRecordMac:
-			// A message auhentication code (MAC) check failed, check your connection, can indicate server problem or an attack
-			// Always fatal
-			fmt.Print("MAC failed, check your connection")
-		case TLSAlertDescriptionDecompressionFailure:
-			// The compression function recived wrong input, mostly indicated corrupted message, decompression methods such as lz77, works by sling a window over the input data to idientify repeted sequences. It replaces these sequences with references to earlier occurances of the same sequence.
-			// Lookahed bufer a samaller buffer within the window that scans for the longer match of the current input string.
-			// Match an literal: if match is found it is encoded a tuple (distnace, length)
-			//
-			// Window	Lookahead	Output
-			// a		bracadabra	Literal a
-			// ab		racadabra	Literal b
-			// abr		acadabra	Literal r
-			// abra		cadabra		Literal a
-			// abrac	adabra		(4, 1) (back 4, length 1)
-			// abracad	abra		(7, 4) (back 7, length 4)
-			fmt.Print("Can't decompress data, could be corrupted input")
-		case TLSAlertDescriptionHandshakeFailure:
-			// Handshake process failed, ensure that server and browser supports required protocol and ciphers, may indicate problem with server configuration
-			// Always fatal
-			fmt.Print("Handshake failure, make sure choose procol and ciphers are supported by both partied")
-		case TLSAlertDescriptionNoCertificate:
-			// No certificate was provided by the peer
-			// Optional field
-			fmt.Print("No certificate provided")
-		case TLSAlertDescriptionBadCertificate:
-			// Bad certificate
-			fmt.Print("Make sure that provided cerificate is valid")
-		case TLSAlertDescriptionUnsupportedCertificate:
-			// The certificate is unsported:
-			// 1. Invalid certificate type, e.g server can only accept x5.09 certificated
-			// 2. Unrecgonized cerrtificate Authority
-			// 3. Certificate algorithm issue, its not supported by peers
-			// 4. Certificate version its not supported
-			fmt.Print("Unsported certificated, make sure both parties support the type, issuer, version and both known authority")
-		case TLSAlertDescriptionCertificateRevoked:
-			// Cerificate was revoke
-			fmt.Print("Certificate revoked")
-		case TLSAlertDescriptionCertificateExpired:
-			// Cerificated expired
-			fmt.Print("Certificate expiered")
-		case TLSAlertDescriptionCertificateUnknown:
-			// 1. Unknown certificate
-			// 2. Untrusted CA
-			// 3. Incomplete Certificate chain, presented certifiacted does not include a complate chain to trsuted root CA
-			// 4. Revoked or expired
-			// 5. Malformed or corrupted
-			// 6. Mimstached purpose, doesnt have appropriate extention
-			// 7. Expired trust store
-			fmt.Print("Unknown certificate, check CA authority, trust store, extenstion compability or maybe its coruppted data")
-		case TLSAlertDescriptionIllegalParameter:
-			// Paramters not allowed or recognized:
-			// 1. Invalid cipher suite, not implmented by one of the parties
-			// 2. Not supported tls version
-			// 3. Incorrected exntesion
-			// 4. Invalid message structure
-			fmt.Print("Illegal paramters, check tls version, supported protcol, extenstion or message structure")
-
-		default:
-			fmt.Printf("Unregonized alert occured: %v", alertDescription)
-		}
-
+		handleAlert(clientHello, conn)
 		if alertLevel == TLSAlertLevelfatal {
 			conn.Close()
 			return []byte{}
 		}
-
 	} else if contentType == byte(TLSContentTypeChangeCipherSpec) {
 		// The change cipher spec message is sent by both the client and the server to notify the reciing part that subsequent record will be protected under the just-negotiated cipherspec and keys. Copy pending state into currnet.
 		// *When resuming a previous sessin, the change cipher spec message is sent after the hello
@@ -1031,5 +611,420 @@ func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) []
 		return clientHello[6:]
 	}
 
+	return []byte{}
+}
+
+func handleAlert(clientHello []byte, conn net.Conn) {
+	// majorVersion := clientHello[1]
+	// minorVersion := clientHello[2]
+	// length := clientHello[3:4]
+	// alertLevel := TlSAlertLevel(clientHello[5])
+	alertDescription := TLSAlertDescription(clientHello[6])
+
+	switch alertDescription {
+	case TLSAlertDescriptionCloseNotify:
+		// The connection is closing or has been closed gracefully, no action needed
+		conn.Close()
+	case TLSAlertDescriptionUnexpectedMessage:
+		// Do Retry, bad message recive, long term problem can indicate protocol mismatch(client expecting e.g tls 1.2 and server sending 1.3), incorrect squence or error in
+		fmt.Print("Unexpected message, Retry connectin again, if problem persist, check configuration")
+
+	case TLSAlertDescriptionBadRecordMac:
+		// A message auhentication code (MAC) check failed, check your connection, can indicate server problem or an attack
+		// Always fatal
+		fmt.Print("MAC failed, check your connection")
+	case TLSAlertDescriptionDecompressionFailure:
+		// The compression function recived wrong input, mostly indicated corrupted message, decompression methods such as lz77, works by sling a window over the input data to idientify repeted sequences. It replaces these sequences with references to earlier occurances of the same sequence.
+		// Lookahed bufer a samaller buffer within the window that scans for the longer match of the current input string.
+		// Match an literal: if match is found it is encoded a tuple (distance, length)
+		//
+		// Window	Lookahead	Output
+		// a		bracadabra	Literal a
+		// ab		racadabra	Literal b
+		// abr		acadabra	Literal r
+		// abra		cadabra		Literal a
+		// abrac	adabra		(4, 1) (back 4, length 1)
+		// abracad	abra		(7, 4) (back 7, length 4)
+		fmt.Print("Can't decompress data, could be corrupted input")
+	case TLSAlertDescriptionHandshakeFailure:
+		// Handshake process failed, ensure that server and browser supports required protocol and ciphers, may indicate problem with server configuration
+		// Always fatal
+		fmt.Print("Handshake failure, make sure choose procol and ciphers are supported by both partied")
+	case TLSAlertDescriptionNoCertificate:
+		// No certificate was provided by the peer
+		// Optional field
+		fmt.Print("No certificate provided")
+	case TLSAlertDescriptionBadCertificate:
+		// Bad certificate
+		fmt.Print("Make sure that provided cerificate is valid")
+	case TLSAlertDescriptionUnsupportedCertificate:
+		// The certificate is unsported:
+		// 1. Invalid certificate type, e.g server can only accept x5.09 certificated
+		// 2. Unrecgonized cerrtificate Authority
+		// 3. Certificate algorithm issue, its not supported by peers
+		// 4. Certificate version its not supported
+		fmt.Print("Unsported certificated, make sure both parties support the type, issuer, version and both known authority")
+	case TLSAlertDescriptionCertificateRevoked:
+		// Cerificate was revoke
+		fmt.Print("Certificate revoked")
+	case TLSAlertDescriptionCertificateExpired:
+		// Cerificated expired
+		fmt.Print("Certificate expiered")
+	case TLSAlertDescriptionCertificateUnknown:
+		// 1. Unknown certificate
+		// 2. Untrusted CA
+		// 3. Incomplete Certificate chain, presented certifiacted does not include a complate chain to trsuted root CA
+		// 4. Revoked or expired
+		// 5. Malformed or corrupted
+		// 6. Mimstached purpose, doesnt have appropriate extention
+		// 7. Expired trust store
+		fmt.Print("Unknown certificate, check CA authority, trust store, extenstion compability or maybe its coruppted data")
+	case TLSAlertDescriptionIllegalParameter:
+		// Paramters not allowed or recognized:
+		// 1. Invalid cipher suite, not implmented by one of the parties
+		// 2. Not supported tls version
+		// 3. Incorrected exntesion
+		// 4. Invalid message structure
+		fmt.Print("Illegal paramters, check tls version, supported protcol, extenstion or message structure")
+
+	default:
+		fmt.Printf("Unregonized alert occured: %v", alertDescription)
+	}
+
+}
+
+func handleHandshake(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
+
+	handshakeMessageType := TLSHandshakeMessageType(clientHello[5])
+
+	if handshakeMessageType == TLSHandshakeMessageClinetHello {
+		return handleHandshakeClientHello(clientHello, serverData, conn)
+	} else if handshakeMessageType == TLSHandshakeMessageClientKeyExchange {
+
+		return handleHandshakeClientKeyExchange(clientHello, serverData, conn)
+
+	} else if handshakeMessageType == TLSHandshakeMessageFinished {
+		return handleHandshakeClientFinished(clientHello, serverData, conn)
+
+	}
+	return []byte{}
+}
+
+func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
+
+	// client hello
+	// handshakeLength := int32(clientHello[6])<<16 | int32(clientHello[7])<<8 | int32(clientHello[8])
+
+	clientVersion := binary.BigEndian.Uint16(clientHello[9:11]) // backward compability, used to dicated which version to use, now there is set in protocol version and newest one is chosen.
+
+	switch clientVersion {
+	case 0x0200:
+		fmt.Print("CLient version: SSL 2.0")
+	case 0x0300:
+		fmt.Print("Client version: SSL 3.0")
+	}
+
+	//client random
+	fmt.Println(clientHello[11:15])
+	radnomBytesTime := binary.BigEndian.Uint32(clientHello[11:15])
+	radnomBytesData := clientHello[15:43]
+	serverData.clientRandom = clientHello[11:43]
+
+	fmt.Println("Unix time")
+	fmt.Println(time.Unix(int64(radnomBytesTime), 0))
+	fmt.Println("random bytes")
+	fmt.Println(radnomBytesData)
+	//session id
+	// session := clientHello[43]
+
+	//cipher suites
+	// cipherSuiteLength := binary.BigEndian.Uint16(clientHello[44:46])
+	// cipherSuites := clientHello[46 : 46+cipherSuiteLength]
+
+	if clientHello[44] == 255 {
+		//
+		//    Note: All cipher suites whose first byte is 0xFF are considered
+		//    private and can be used for defining local/experimental algorithms.
+		//    Interoperability of such types is a local matter.
+	} else {
+		// other encryptions
+	}
+	// compression mehod
+	// compressionMethod := clientHello[46+cipherSuiteLength]
+
+	currentTime := time.Now()
+	unixTime := currentTime.Unix()
+
+	unitTimeBytes := int64ToBIgEndian(unixTime)
+	randomBytes := make([]byte, 28)
+
+	_, err := rand.Read(randomBytes)
+
+	if err != nil {
+		fmt.Print("problem generating random bytes")
+	}
+
+	type Resp struct {
+		contentType       byte
+		version           []byte
+		recordLength      []byte
+		handshakeType     byte
+		handshakeLength   []byte
+		protocolVersion   []byte
+		gmtUnixTime       []byte
+		serverRandom      []byte
+		sessionId         byte
+		cipherSuite       []byte
+		compressionMethod []byte
+	}
+
+	cipherSuite := []byte{0, 27}
+	compressionMethodd := []byte{0}
+	protocolVersion := []byte{3, 0}
+	sessionIdd := byte(0)
+	//                  time				random bytes	 session id cypher suit	  compression methodd
+	handshakeLengthh := len(unitTimeBytes) + len(randomBytes) + 1 + len(cipherSuite) + len(compressionMethodd) + len(protocolVersion)
+	handshakeLengthhByte, err := intTo3BytesBigEndian(handshakeLengthh)
+	recordLengthhByte := int32ToBIgEndian(handshakeLengthh + 4)
+	resppp := Resp{
+		contentType:       22,
+		version:           []byte{3, 0},
+		recordLength:      recordLengthhByte, //2 bytes
+		handshakeType:     2,
+		handshakeLength:   handshakeLengthhByte, //3 bytes,
+		protocolVersion:   protocolVersion,
+		gmtUnixTime:       unitTimeBytes,
+		serverRandom:      randomBytes,
+		sessionId:         sessionIdd,
+		cipherSuite:       cipherSuite,
+		compressionMethod: compressionMethodd,
+	}
+	serverRandom := []byte{}
+	serverRandom = append(serverRandom, resppp.gmtUnixTime...)
+	serverRandom = append(serverRandom, resppp.serverRandom...)
+	serverData.serverRandom = serverRandom
+	// copy(serverData.serverRandom, serverRandom)
+
+	respEnd := []byte{resppp.contentType}
+	respEnd = append(respEnd, resppp.version...)
+	respEnd = append(respEnd, resppp.recordLength...)
+	respEnd = append(respEnd, resppp.handshakeType)
+	respEnd = append(respEnd, resppp.handshakeLength...)
+	respEnd = append(respEnd, resppp.protocolVersion...)
+	respEnd = append(respEnd, resppp.gmtUnixTime...)
+	respEnd = append(respEnd, resppp.serverRandom...)
+	respEnd = append(respEnd, resppp.sessionId)
+	respEnd = append(respEnd, resppp.cipherSuite...)
+	respEnd = append(respEnd, resppp.compressionMethod...)
+
+	_, err = conn.Write(respEnd)
+	serverData.allMessagesShort = append(serverData.allMessagesShort, respEnd[5:])
+
+	if err != nil {
+		fmt.Println("Error reading Client Hello:", err)
+		return []byte{}
+	}
+
+	// Two bytes should be converted and checked
+	if cipherSuite[1] >= 23 && cipherSuite[1] <= 27 {
+		// anonmouys cipher we need to send server key exchange message all are dh
+		// 		enum { rsa, diffie_hellman, fortezza_kea }
+		// 		KeyExchangeAlgorithm;
+
+		//  struct {
+		// 	 opaque rsa_modulus<1..2^16-1>;
+		// 	 opaque rsa_exponent<1..2^16-1>;
+		//  } ServerRSAParams;
+		// struct {
+		// 	opaque dh_p<1..2^16-1>;
+		// 	opaque dh_g<1..2^16-1>;
+		// 	opaque dh_Ys<1..2^16-1>;
+		// } ServerDHParams;     /* Ephemeral DH parameters */
+
+		// struct {
+		// 	opaque r_s [128];
+		// } ServerFortezzaParams;
+		// enum { anonymous, rsa, dsa } SignatureAlgorithm;
+
+		// digitally-signed struct {
+		// 	select(SignatureAlgorithm) {
+		// 		case anonymous: struct { };
+		// 		case rsa:
+		// 			opaque md5_hash[16];
+		// 			opaque sha_hash[20];
+		// 		case dsa:
+		// 			opaque sha_hash[20];
+		// 	};
+		// } Signature;
+		// struct {
+		// 	select (KeyExchangeAlgorithm) {
+		// 		case diffie_hellman:
+		// 			ServerDHParams params;
+		// 			Signature signed_params;
+		// 		case rsa:
+		// 			ServerRSAParams params;
+		// 			Signature signed_params;
+		// 		case fortezza_kea:
+		// 			ServerFortezzaParams params;
+		// 	};
+		// } ServerKeyExchange;
+
+		pPrime, ok := new(big.Int).SetString("3", 16)
+		if !ok {
+			fmt.Println("Error generating private key:", err)
+			return []byte{}
+		}
+		gGenerator := big.NewInt(2)
+		serverPrivateVal, err := generatePrivateKey(pPrime)
+		if err != nil {
+			fmt.Println("Error generating private key:", err)
+			return []byte{}
+		}
+		serverPublicVal := computePublicKey(gGenerator, serverPrivateVal, pPrime)
+
+		serverData.p = pPrime
+		serverData.q = gGenerator
+		serverData.private = serverPrivateVal
+
+		a1 := pPrime.Bytes()     // p a large prime nmber
+		a2 := gGenerator.Bytes() // g a base used for generic public values
+		// p and g are public paramters, both parties need to know these paramters to perform the key exchange
+
+		a3 := serverPublicVal.Bytes() // Ys the server public key
+		// the server public key is essential for the client t ocompue the shared secre, the clients needs this value to compute its own private value
+
+		// to calcualte shared secret i need to clientPublic^serverPriavte mod p (pprime)
+
+		all := []byte{}
+		all = append(all, []byte{0, byte(len(a1))}...)
+		all = append(all, a1...)
+		all = append(all, []byte{0, byte(len(a2))}...)
+		all = append(all, a2...)
+		all = append(all, []byte{0, byte(len(a3))}...)
+		all = append(all, a3...)
+
+		handshakeLengthh := len(all)
+		handshakeLengthhByte, err := intTo3BytesBigEndian(handshakeLengthh)
+		if err != nil {
+			fmt.Print("err while converting to big endina")
+		}
+		recordLengthhByte := int32ToBIgEndian(handshakeLengthh + 4)
+
+		resppp := Resp{
+			contentType:     22,
+			version:         []byte{3, 0},
+			recordLength:    recordLengthhByte, //2 bytes
+			handshakeType:   12,
+			handshakeLength: handshakeLengthhByte, //3 bytes,
+		}
+
+		respENd := []byte{resppp.contentType}
+		respENd = append(respENd, resppp.version...)
+		respENd = append(respENd, resppp.recordLength...)
+		respENd = append(respENd, resppp.handshakeType)
+		respENd = append(respENd, resppp.handshakeLength...)
+		respENd = append(respENd, all...)
+
+		_, err = conn.Write(respENd)
+		serverData.allMessagesShort = append(serverData.allMessagesShort, respENd[5:])
+		if err != nil {
+			fmt.Println("Error reading Client Hello:", err)
+			return []byte{}
+		}
+
+	}
+
+	resp := []byte{22, 3, 0, 0, 4, 14, 0, 0, 0}
+
+	_, err = conn.Write(resp)
+	serverData.allMessagesShort = append(serverData.allMessagesShort, resp[5:])
+	if err != nil {
+		fmt.Println("Error reading Client Hello:", err)
+		return []byte{}
+	}
+
+	return []byte{}
+}
+
+func handleHandshakeClientKeyExchange(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
+	// handshakeLength := int32(clientHello[6])<<16 | int32(clientHello[7])<<8 | int32(clientHello[8])
+	clientPublicKeyLength := binary.BigEndian.Uint16(clientHello[9:11])
+	clientPublicKey := clientHello[11 : 11+clientPublicKeyLength]
+
+	for _, v := range serverData.allMessagesShort {
+		fmt.Println(v)
+	}
+
+	clinetPublicKeyInt := new(big.Int).SetBytes(clientPublicKey)
+
+	sharedSecret := computeSharedSecret(clinetPublicKeyInt, serverData.private, serverData.p)
+
+	masterKeySeed := []byte{}
+	keyBlockSeed := []byte{}
+	masterKeySeed = append(masterKeySeed, serverData.clientRandom...)
+
+	masterKeySeed = append(masterKeySeed, serverData.serverRandom...)
+
+	keyBlockSeed = append(keyBlockSeed, serverData.serverRandom...)
+	keyBlockSeed = append(keyBlockSeed, serverData.clientRandom...)
+
+	//Hardcoded for testing
+	masterKey := ssl_prf(sharedSecret.Bytes(), masterKeySeed, 48)
+	keyBlock := ssl_prf(masterKey, keyBlockSeed, 104)
+	macClient := keyBlock[0:20]
+	macServer := keyBlock[20:40]
+	writeKeyClient := keyBlock[40:64]
+	writeKeyServer := keyBlock[64:88]
+	IVClient := keyBlock[88:96]
+	IVServer := keyBlock[96:104]
+
+	serverData.macClient = macClient
+	serverData.macServer = macServer
+	serverData.writeKeyClient = writeKeyClient
+	serverData.writeKeyServer = writeKeyServer
+	serverData.IVClient = IVClient
+	serverData.IVServer = IVServer
+
+	serverData.masterKey = masterKey
+
+	serverData.shared = sharedSecret
+
+	return clientHello[11+clientPublicKeyLength:]
+}
+
+func handleHandshakeClientFinished(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
+	// pad1 := byte(0x36)
+	// pad2 := byte(0x5c)
+	// clientBytes := []byte{0x43, 0x4C, 0x4E, 0x54}
+
+	// clientVerifyHash := []byte{}
+
+	// md5Hash := generate_finished_message_md5(serverData.masterKey, clientBytes, serverData.allMessages, serverData.allMessagesShort, pad1, pad2)
+	// shaHash := generate_finished_message_sha1(serverData.masterKey, clientBytes, serverData.allMessages, serverData.allMessagesShort, pad1, pad2)
+
+	// clientVerifyHash = append(clientVerifyHash, md5Hash...)
+	// clientVerifyHash = append(clientVerifyHash, shaHash...)
+
+	// fmt.Println("\nhash")
+	// for _, b := range clientVerifyHash {
+	// 	fmt.Printf(" %02X", b)
+	// }
+
+	// hashAndHeader := []byte{20, 0, 0, 36}
+	// hashAndHeader = append(hashAndHeader, clientVerifyHash...)
+	// fmt.Println("hash and header len")
+	// fmt.Println(len(hashAndHeader))
+
+	// streamCipher := generateStreamCipher(serverData.macClient, hashAndHeader)
+	// fmt.Println("moment of the truth, what is a stream cipher!!!")
+	// for _, b := range streamCipher {
+	// 	fmt.Printf(" %02X", b)
+	// }
+
+	// combinedBytes := []byte{}
+	// combinedBytes = append(combinedBytes, hashAndHeader...)
+	// combinedBytes = append(combinedBytes, streamCipher...)
+
+	// paddd := addCustomPadding(combinedBytes, 64)
 	return []byte{}
 }
