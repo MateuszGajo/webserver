@@ -3,18 +3,18 @@ package http
 import "C"
 import (
 	"bytes"
-	"crypto/cipher"
-	"crypto/des"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash"
 	"math/big"
 	"net"
-	"os"
 	"time"
+	s3_cipher "webserver/cipher"
+	"webserver/common"
 )
 
 // SSL 3.0
@@ -164,50 +164,6 @@ const (
 	TLSCipherSpecDefault TLSCipherSpec = 1
 )
 
-type TLSCipherSuite byte
-
-const (
-	TLS_CIPER_SUITE_SSL_NULL_WITH_NULL_NULL            TLSCipherSuite = 0
-	TLS_CIPER_SUITE_SSL_RSA_WITH_NULL_MD5              TLSCipherSuite = 1
-	TLS_CIPER_SUITE_SSL_RSA_WITH_NULL_SHA              TLSCipherSuite = 2
-	TLS_CIPER_SUITE_SSL_RSA_EXPORT_WITH_RC4_40_MD5     TLSCipherSuite = 3
-	TLS_CIPER_SUITE_SSL_RSA_WITH_RC4_128_MD5           TLSCipherSuite = 4
-	TLS_CIPER_SUITE_SSL_RSA_WITH_RC4_128_SHA           TLSCipherSuite = 5
-	TLS_CIPER_SUITE_SSL_RSA_EXPORT_WITH_RC2_CBC_40_MD5 TLSCipherSuite = 6
-	TLS_CIPER_SUITE_SSL_RSA_WITH_IDEA_CBC_SHA          TLSCipherSuite = 7
-	TLS_CIPER_SUITE_SSL_RSA_EXPORT_WITH_DES40_CBC_SHA  TLSCipherSuite = 8
-	TLS_CIPER_SUITE_SSL_RSA_WITH_DES_CBC_SHA           TLSCipherSuite = 9
-	TLS_CIPER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA      TLSCipherSuite = 10
-	//Following cipher suite definition requires that server provide an rsa certificat ethat can be used for key exchange.
-	TLS_CIPER_SUITE_SSL_DH_DSS_EXPORT_WITH_DES40_CBC_SHA  TLSCipherSuite = 11
-	TLS_CIPER_SUITE_SSL_DH_DSS_WITH_DES_CBC_SHA           TLSCipherSuite = 12
-	TLS_CIPER_SUITE_SSL_DH_DSS_WITH_3DES_EDE_CBC_SHA      TLSCipherSuite = 13
-	TLS_CIPER_SUITE_SSL_DH_RSA_EXPORT_WITH_DES40_CBC_SHA  TLSCipherSuite = 14
-	TLS_CIPER_SUITE_SSL_DH_RSA_WITH_DES_CBC_SHA           TLSCipherSuite = 15
-	TLS_CIPER_SUITE_SSL_DH_RSA_WITH_3DES_EDE_CBC_SHA      TLSCipherSuite = 16
-	TLS_CIPER_SUITE_SSL_DHE_DSS_EXPORT_WITH_DES40_CBC_SHA TLSCipherSuite = 17
-	TLS_CIPER_SUITE_SSL_DHE_DSS_WITH_DES_CBC_SHA          TLSCipherSuite = 18
-	TLS_CIPER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA     TLSCipherSuite = 19
-	TLS_CIPER_SUITE_SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA TLSCipherSuite = 20
-	TLS_CIPER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SH           TLSCipherSuite = 21
-	TLS_CIPER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA     TLSCipherSuite = 22
-	// Folowing cipher suited are used for server-authenticated (optianlly client) diffie-hellman. Dh denotes cipher suited in which the server-s certificate contains dh paramters signed by the  certificate authority.
-	// dhe denothes ephemral diffie-hellman where dh paramters are signed by dss or rsa cerificate, which has been signed by ca. The sigin algorithm used in specified after the dh or dhepparamter.
-	// In all case  the clie must have the same type of cerificate, and must use the dh paramters chosen by the server
-
-	TLS_CIPER_SUITE_SSL_DH_anon_EXPORT_WITH_RC4_40_MD5    TLSCipherSuite = 23
-	TLS_CIPER_SUITE_SSL_DH_anon_WITH_RC4_128_MD5          TLSCipherSuite = 24
-	TLS_CIPER_SUITE_SSL_DH_anon_EXPORT_WITH_DES40_CBC_SHA TLSCipherSuite = 25
-	TLS_CIPER_SUITE_SSL_DH_anon_WITH_DES_CBC_SHA          TLSCipherSuite = 26
-	TLS_CIPER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA     TLSCipherSuite = 27
-	// The following cipher suited are used for completely anonymous diffie hellman in which neither party is authenticated. Note thi is extremly vuluberable to man in the middle attackers, so its strongly discouraged to use it.
-	TLS_CIPER_SUITE_SSL_FORTEZZA_KEA_WITH_NULL_SHA         TLSCipherSuite = 28
-	TLS_CIPER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA TLSCipherSuite = 29
-	TLS_CIPER_SUITE_SSL_FORTEZZA_KEA_WITH_RC4_128_SHA      TLSCipherSuite = 30
-	// fortezza tokens used in the highly secure env such as goverment
-	//
-)
-
 type TLSCompressionAlgorithm byte
 
 const (
@@ -256,30 +212,10 @@ func int64ToBIgEndian(val int64) []byte {
 	return bytes
 }
 
-type ServerData struct {
-	isEncrypted      bool
-	p                *big.Int
-	q                *big.Int
-	private          *big.Int
-	public           *big.Int
-	shared           *big.Int
-	clientRandom     []byte
-	serverRandom     []byte
-	allMessagesShort [][]byte
-	masterKey        []byte
-	macClient        []byte
-	macServer        []byte
-	writeKeyClient   []byte
-	writeKeyServer   []byte
-	IVClient         []byte
-	IVServer         []byte
-	seqNum           int
-}
-
 func HandleConnection(conn net.Conn) {
 	fmt.Print("connection")
 	defer conn.Close()
-	serverData := ServerData{seqNum: 0}
+	serverData := common.ServerData{SeqNum: 0}
 	for {
 
 		buff := make([]byte, 1024)
@@ -421,96 +357,81 @@ func ssl_prf(secret, seed []byte, req_len int) []byte {
 	return result
 }
 
-func decrypt3DESCBC(key, iv, ciphertext []byte) ([]byte, error) {
-	block, err := des.NewTripleDESCipher(key)
+var ssl3Pad1 = []byte{
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36}
 
-	if err != nil {
-		return nil, err
+// for sha
+var ssl3Pad2 = []byte{
+	0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
+	0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
+	0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
+	0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
+	0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
+	0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c}
+
+type StreamCipherHash string
+
+const (
+	streamCipherHashMD5 = "streamCipherHashMD5"
+	streamCipherHashSHA = "streamCipherHashSHA"
+)
+
+// TODO: lets think about seq number how to increment it and add it struct here, lets make GC lighweight
+func generateStreamCipher(streamCipherHash StreamCipherHash, writeSecret, dataCompressedType, sslCompressData []byte, seqNum []byte) []byte {
+
+	// 	stream-ciphered struct {
+	// 		opaque content[SSLCompressed.length];
+	// 		opaque MAC[CipherSpec.hash_size];
+	// 	} GenericStreamCipher;
+
+	// The MAC is generated as:
+
+	// 	hash(MAC_write_secret + pad_2 +
+	// 		 hash(MAC_write_secret + pad_1 + seq_num +
+	// 			  SSLCompressed.type + SSLCompressed.length +
+	// 			  SSLCompressed.fragment));
+	var nPad int
+	var hashFunc hash.Hash
+
+	switch streamCipherHash {
+	case streamCipherHashMD5:
+		nPad = 48
+		hashFunc = md5.New()
+	case streamCipherHashSHA:
+		nPad = 40
+		hashFunc = sha1.New()
+	default:
+		panic("wrong algorithm used can't use: " + streamCipherHash)
 	}
 
-	if len(ciphertext)%block.BlockSize() != 0 {
-		return nil, fmt.Errorf("ciphertext should be multiplier of block size")
-	}
+	ssl3Pad1Sha := ssl3Pad1[:nPad]
 
-	mode := cipher.NewCBCDecrypter(block, iv)
-	decrypted := make([]byte, len(ciphertext))
-	mode.CryptBlocks(decrypted, ciphertext)
+	ssl3Pad2Sha := ssl3Pad2[:nPad]
 
-	return decrypted, nil
-}
-
-func encrypt3DESCBC(key, iv, ciphertext []byte) ([]byte, error) {
-	block, err := des.NewTripleDESCipher(key)
-
-	if err != nil {
-		return nil, err
-	}
-
-	if len(ciphertext)%block.BlockSize() != 0 {
-		return nil, fmt.Errorf("ciphertext should be multiplier of block size")
-	}
-
-	mode := cipher.NewCBCDecrypter(block, iv)
-	encrypted := make([]byte, len(ciphertext))
-	mode.CryptBlocks(encrypted, ciphertext)
-
-	return encrypted, nil
-}
-
-func generateStreamCipher(writeSecret, sslCompressData []byte) []byte {
-	//
-	// 	 hash(MAC_write_secret + pad_2 +
-	// 		hash(MAC_write_secret + pad_1 + seq_num +
-	// 			 SSLCompressed.type + SSLCompressed.length +
-	// 			 SSLCompressed.fragment));
-
-	// pad_1:  The character 0x36 repeated 48 times for MD5 or 40 times for
-	// SHA.
-
-	ssl3Pad1 := []byte{
-		0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
-		0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
-		0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
-		0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
-		0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
-		0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36}
-	// for sha
-	ssl3Pad1Sha := ssl3Pad1[:40]
-
-	// pad_2:  The character 0x5c repeated 48 times for MD5 or 40 times for
-	// SHA.
-	ssl3Pad2 := []byte{
-		0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
-		0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
-		0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
-		0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
-		0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
-		0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c}
-	ssl3Pad2Sha := ssl3Pad2[:40]
-
-	// seq_num:  The sequence number for this message.
-	// seqNum := serverData.seqNum 8 bytes
-	seqNum := []byte{0, 0, 0, 0, 0, 0, 0, 0}
-	sslCompresType := []byte{22}
+	// seqNum := []byte{0, 0, 0, 0, 0, 0, 0, 0}
 	sslCompressLength := []byte{0, 40}
 
-	sha := sha1.New()
-	sha.Write(writeSecret)
-	sha.Write(ssl3Pad1Sha)
-	sha.Write(seqNum)
+	hashFunc.Write(writeSecret)
+	hashFunc.Write(ssl3Pad1Sha)
+	hashFunc.Write(seqNum)
 
-	sha.Write(sslCompresType)
+	hashFunc.Write(dataCompressedType)
 
-	sha.Write(sslCompressLength)
-	sha.Write(sslCompressData)
+	hashFunc.Write(sslCompressLength)
+	hashFunc.Write(sslCompressData)
 
-	tmp := sha.Sum(nil)
-	sha.Reset()
-	sha.Write(writeSecret)
-	sha.Write(ssl3Pad2Sha)
-	sha.Write(tmp)
+	tmp := hashFunc.Sum(nil)
+	hashFunc.Reset()
+	hashFunc.Write(writeSecret)
+	hashFunc.Write(ssl3Pad2Sha)
+	hashFunc.Write(tmp)
 
-	return sha.Sum(nil)
+	return hashFunc.Sum(nil)
 }
 
 func addCustomPadding(src []byte, blockSize int) []byte {
@@ -522,44 +443,7 @@ func addCustomPadding(src []byte, blockSize int) []byte {
 	return append(src, padtext...)
 }
 
-func removeCustomPadding(src []byte, blockSize int) ([]byte, error) {
-	paddingLen := int(src[len(src)-1]) + 1 // openssl did it this way, len of padding is -1
-
-	if paddingLen < 1 || paddingLen > blockSize {
-		return nil, fmt.Errorf("invalid padding length")
-	}
-
-	for i := 0; i < paddingLen-1; i++ {
-		if src[len(src)-paddingLen+i] != 0 {
-			return nil, fmt.Errorf("invalid padding byte")
-		}
-	}
-
-	return src[:len(src)-paddingLen], nil
-}
-
-func decryptMessage(recordLayerData []byte, encryptedData []byte, serverData *ServerData) []byte {
-	encryptedMessage := encryptedData
-
-	decodedMsg, err := decrypt3DESCBC(serverData.writeKeyClient, serverData.IVClient, encryptedMessage)
-	if err != nil {
-		fmt.Println("problem decrypting data")
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	decodedMsgWithoutPadding, err := removeCustomPadding(decodedMsg, 64)
-	if err != nil {
-		fmt.Println("problem removing padding")
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	decryptedClientHello := recordLayerData
-	decryptedClientHello = append(decryptedClientHello, decodedMsgWithoutPadding...)
-
-	return decryptedClientHello
-}
-
-func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) []byte {
+func handleMessage(clientHello []byte, conn net.Conn, serverData *common.ServerData) []byte {
 	contentType := clientHello[0]
 
 	version := binary.BigEndian.Uint16(clientHello[1:3])
@@ -574,8 +458,8 @@ func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) []
 	}
 	// record length is only 2 bytes while handshake can be 3 bytes, when that happend two request are transmited and reasmbled into one
 
-	if serverData.isEncrypted {
-		decryptedData := decryptMessage(clientHello[:5], clientHello[5:], serverData)
+	if serverData.IsEncrypted {
+		decryptedData := s3_cipher.DecryptMessage(clientHello[:5], clientHello[5:], serverData)
 		fmt.Println("decrypted client hello")
 		fmt.Println(decryptedData)
 		fmt.Println("decrypted client hex")
@@ -586,7 +470,7 @@ func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) []
 
 	}
 
-	serverData.allMessagesShort = append(serverData.allMessagesShort, clientHello[5:5+recordLength])
+	serverData.AllMessagesShort = append(serverData.AllMessagesShort, clientHello[5:5+recordLength])
 
 	if contentType == byte(TLSContentTypeHandshake) {
 		return handleHandshake(clientHello, serverData, conn)
@@ -607,7 +491,7 @@ func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) []
 		if message == TLSCipherSpecDefault {
 			fmt.Print("Sender is switching to new cipher :)")
 		}
-		serverData.isEncrypted = true
+		serverData.IsEncrypted = true
 		return clientHello[6:]
 	}
 
@@ -693,7 +577,7 @@ func handleAlert(clientHello []byte, conn net.Conn) {
 
 }
 
-func handleHandshake(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
+func handleHandshake(clientHello []byte, serverData *common.ServerData, conn net.Conn) []byte {
 
 	handshakeMessageType := TLSHandshakeMessageType(clientHello[5])
 
@@ -710,7 +594,7 @@ func handleHandshake(clientHello []byte, serverData *ServerData, conn net.Conn) 
 	return []byte{}
 }
 
-func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
+func handleHandshakeClientHello(clientHello []byte, serverData *common.ServerData, conn net.Conn) []byte {
 
 	// client hello
 	// handshakeLength := int32(clientHello[6])<<16 | int32(clientHello[7])<<8 | int32(clientHello[8])
@@ -728,7 +612,7 @@ func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn
 	fmt.Println(clientHello[11:15])
 	radnomBytesTime := binary.BigEndian.Uint32(clientHello[11:15])
 	radnomBytesData := clientHello[15:43]
-	serverData.clientRandom = clientHello[11:43]
+	serverData.ClientRandom = clientHello[11:43]
 
 	fmt.Println("Unix time")
 	fmt.Println(time.Unix(int64(radnomBytesTime), 0))
@@ -779,6 +663,7 @@ func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn
 	}
 
 	cipherSuite := []byte{0, 27}
+	serverData.SelectedCipherSuite = 0x001B
 	compressionMethodd := []byte{0}
 	protocolVersion := []byte{3, 0}
 	sessionIdd := byte(0)
@@ -802,7 +687,7 @@ func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn
 	serverRandom := []byte{}
 	serverRandom = append(serverRandom, resppp.gmtUnixTime...)
 	serverRandom = append(serverRandom, resppp.serverRandom...)
-	serverData.serverRandom = serverRandom
+	serverData.ServerRandom = serverRandom
 	// copy(serverData.serverRandom, serverRandom)
 
 	respEnd := []byte{resppp.contentType}
@@ -818,7 +703,7 @@ func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn
 	respEnd = append(respEnd, resppp.compressionMethod...)
 
 	_, err = conn.Write(respEnd)
-	serverData.allMessagesShort = append(serverData.allMessagesShort, respEnd[5:])
+	serverData.AllMessagesShort = append(serverData.AllMessagesShort, respEnd[5:])
 
 	if err != nil {
 		fmt.Println("Error reading Client Hello:", err)
@@ -882,9 +767,9 @@ func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn
 		}
 		serverPublicVal := computePublicKey(gGenerator, serverPrivateVal, pPrime)
 
-		serverData.p = pPrime
-		serverData.q = gGenerator
-		serverData.private = serverPrivateVal
+		serverData.P = pPrime
+		serverData.Q = gGenerator
+		serverData.Private = serverPrivateVal
 
 		a1 := pPrime.Bytes()     // p a large prime nmber
 		a2 := gGenerator.Bytes() // g a base used for generic public values
@@ -926,7 +811,7 @@ func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn
 		respENd = append(respENd, all...)
 
 		_, err = conn.Write(respENd)
-		serverData.allMessagesShort = append(serverData.allMessagesShort, respENd[5:])
+		serverData.AllMessagesShort = append(serverData.AllMessagesShort, respENd[5:])
 		if err != nil {
 			fmt.Println("Error reading Client Hello:", err)
 			return []byte{}
@@ -937,7 +822,7 @@ func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn
 	resp := []byte{22, 3, 0, 0, 4, 14, 0, 0, 0}
 
 	_, err = conn.Write(resp)
-	serverData.allMessagesShort = append(serverData.allMessagesShort, resp[5:])
+	serverData.AllMessagesShort = append(serverData.AllMessagesShort, resp[5:])
 	if err != nil {
 		fmt.Println("Error reading Client Hello:", err)
 		return []byte{}
@@ -946,27 +831,29 @@ func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn
 	return []byte{}
 }
 
-func handleHandshakeClientKeyExchange(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
+func handleHandshakeClientKeyExchange(clientHello []byte, serverData *common.ServerData, conn net.Conn) []byte {
 	// handshakeLength := int32(clientHello[6])<<16 | int32(clientHello[7])<<8 | int32(clientHello[8])
+	// TODO
+	// change cipher spec is zeroing sequence number
 	clientPublicKeyLength := binary.BigEndian.Uint16(clientHello[9:11])
 	clientPublicKey := clientHello[11 : 11+clientPublicKeyLength]
 
-	for _, v := range serverData.allMessagesShort {
+	for _, v := range serverData.AllMessagesShort {
 		fmt.Println(v)
 	}
 
 	clinetPublicKeyInt := new(big.Int).SetBytes(clientPublicKey)
 
-	sharedSecret := computeSharedSecret(clinetPublicKeyInt, serverData.private, serverData.p)
+	sharedSecret := computeSharedSecret(clinetPublicKeyInt, serverData.Private, serverData.P)
 
 	masterKeySeed := []byte{}
 	keyBlockSeed := []byte{}
-	masterKeySeed = append(masterKeySeed, serverData.clientRandom...)
+	masterKeySeed = append(masterKeySeed, serverData.ClientRandom...)
 
-	masterKeySeed = append(masterKeySeed, serverData.serverRandom...)
+	masterKeySeed = append(masterKeySeed, serverData.ServerRandom...)
 
-	keyBlockSeed = append(keyBlockSeed, serverData.serverRandom...)
-	keyBlockSeed = append(keyBlockSeed, serverData.clientRandom...)
+	keyBlockSeed = append(keyBlockSeed, serverData.ServerRandom...)
+	keyBlockSeed = append(keyBlockSeed, serverData.ClientRandom...)
 
 	//Hardcoded for testing
 	masterKey := ssl_prf(sharedSecret.Bytes(), masterKeySeed, 48)
@@ -978,21 +865,21 @@ func handleHandshakeClientKeyExchange(clientHello []byte, serverData *ServerData
 	IVClient := keyBlock[88:96]
 	IVServer := keyBlock[96:104]
 
-	serverData.macClient = macClient
-	serverData.macServer = macServer
-	serverData.writeKeyClient = writeKeyClient
-	serverData.writeKeyServer = writeKeyServer
+	serverData.MacClient = macClient
+	serverData.MacServer = macServer
+	serverData.WriteKeyClient = writeKeyClient
+	serverData.WriteKeyServer = writeKeyServer
 	serverData.IVClient = IVClient
 	serverData.IVServer = IVServer
 
-	serverData.masterKey = masterKey
+	serverData.MasterKey = masterKey
 
-	serverData.shared = sharedSecret
+	serverData.Shared = sharedSecret
 
 	return clientHello[11+clientPublicKeyLength:]
 }
 
-func handleHandshakeClientFinished(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
+func handleHandshakeClientFinished(clientHello []byte, serverData *common.ServerData, conn net.Conn) []byte {
 	// pad1 := byte(0x36)
 	// pad2 := byte(0x5c)
 	// clientBytes := []byte{0x43, 0x4C, 0x4E, 0x54}
@@ -1015,7 +902,8 @@ func handleHandshakeClientFinished(clientHello []byte, serverData *ServerData, c
 	// fmt.Println("hash and header len")
 	// fmt.Println(len(hashAndHeader))
 
-	// streamCipher := generateStreamCipher(serverData.macClient, hashAndHeader)
+	//sha 40 md5 48
+	// streamCipher := generateStreamCipher(streamCipherHashSHA, serverData.MacClient, hashAndHeader)
 	// fmt.Println("moment of the truth, what is a stream cipher!!!")
 	// for _, b := range streamCipher {
 	// 	fmt.Printf(" %02X", b)
