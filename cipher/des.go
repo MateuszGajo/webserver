@@ -5,7 +5,6 @@ import (
 	"crypto/des"
 	"fmt"
 	"os"
-	"webserver/common"
 )
 
 func Decrypt3DESCBC(key, iv, ciphertext []byte) ([]byte, error) {
@@ -60,10 +59,10 @@ func removeCustomPadding(src []byte, blockSize int) ([]byte, error) {
 	return src[:len(src)-paddingLen], nil
 }
 
-func DecryptDesMessage(recordLayerData []byte, encryptedData []byte, serverData *common.ServerData) []byte {
+func DecryptDesMessage(recordLayerData, encryptedData, writeKey, iv []byte) []byte {
 	encryptedMessage := encryptedData
 
-	decodedMsg, err := Decrypt3DESCBC(serverData.WriteKeyClient, serverData.IVClient, encryptedMessage)
+	decodedMsg, err := Decrypt3DESCBC(writeKey, iv, encryptedMessage)
 	if err != nil {
 		fmt.Println("problem decrypting data")
 		fmt.Println(err)

@@ -14,7 +14,6 @@ import (
 	"net"
 	"time"
 	s3_cipher "webserver/cipher"
-	"webserver/common"
 )
 
 // SSL 3.0
@@ -135,6 +134,8 @@ const (
 	TLSAlertDescriptionIllegalParameter       TLSAlertDescription = 47
 )
 
+const MASTER_SECRET_LENGTH = 48
+
 type TlSAlertLevel byte
 
 const (
@@ -172,6 +173,21 @@ const (
 	// I found it in seperate rfc, every rfc document ssl 3.0 tls 1.0 etc only contains null as compression algorithm nothing more. In tls 1.3 field is depracted + overall compression algorithm had vulnerability
 	// Defalte uses loseless compression, attacker add some data to user's request  and observers if length is changeing, by doing that it can guess what string is in user cookie.
 )
+
+type ServerData struct {
+	IsEncrypted      bool
+	P                *big.Int
+	Q                *big.Int
+	Private          *big.Int
+	Public           *big.Int
+	PreMasterSecret  *big.Int
+	ClientRandom     []byte
+	ServerRandom     []byte
+	AllMessagesShort [][]byte
+	MasterKey        []byte
+	CipherDef        s3_cipher.CipherDef
+	SeqNum           int
+}
 
 // DES -Data encryption standard, block encryption, symmetric key, not secure anymore, succedor is 3des, and then aes replaced them
 
@@ -215,7 +231,7 @@ func int64ToBIgEndian(val int64) []byte {
 func HandleConnection(conn net.Conn) {
 	fmt.Print("connection")
 	defer conn.Close()
-	serverData := common.ServerData{SeqNum: 0}
+	serverData := ServerData{SeqNum: 0}
 	for {
 
 		buff := make([]byte, 1024)
@@ -228,6 +244,13 @@ func HandleConnection(conn net.Conn) {
 		clientHello := buff[:n]
 
 		for len(clientHello) > 0 {
+			fmt.Println("\n loop cipher suite in main")
+			fmt.Println("cipher suite in main")
+			fmt.Println("cipher suite in main")
+			fmt.Println(serverData.CipherDef.CipherSuite)
+			fmt.Println("cipher suite in main")
+			fmt.Println("cipher suite in main")
+			fmt.Println("cipher suite in main")
 
 			clientHello = handleMessage(clientHello, conn, &serverData)
 		}
@@ -443,7 +466,7 @@ func addCustomPadding(src []byte, blockSize int) []byte {
 	return append(src, padtext...)
 }
 
-func handleMessage(clientHello []byte, conn net.Conn, serverData *common.ServerData) []byte {
+func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) []byte {
 	contentType := clientHello[0]
 
 	version := binary.BigEndian.Uint16(clientHello[1:3])
@@ -459,7 +482,12 @@ func handleMessage(clientHello []byte, conn net.Conn, serverData *common.ServerD
 	// record length is only 2 bytes while handshake can be 3 bytes, when that happend two request are transmited and reasmbled into one
 
 	if serverData.IsEncrypted {
-		decryptedData := s3_cipher.DecryptMessage(clientHello[:5], clientHello[5:], serverData)
+		fmt.Println("cipher suite111")
+		fmt.Println("cipher suite111")
+		fmt.Println(serverData.CipherDef.CipherSuite)
+		fmt.Println("cipher suite111")
+		fmt.Println("cipher suite111")
+		decryptedData := s3_cipher.DecryptMessage(clientHello[:5], clientHello[5:], serverData.CipherDef.CipherSuite, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
 		fmt.Println("decrypted client hello")
 		fmt.Println(decryptedData)
 		fmt.Println("decrypted client hex")
@@ -487,12 +515,7 @@ func handleMessage(clientHello []byte, conn net.Conn, serverData *common.ServerD
 		// majorVersion := clientHello[1]
 		// minorVersion := clientHello[2]
 		// length := clientHello[3:4]
-		message := TLSCipherSpec(clientHello[5])
-		if message == TLSCipherSpecDefault {
-			fmt.Print("Sender is switching to new cipher :)")
-		}
-		serverData.IsEncrypted = true
-		return clientHello[6:]
+		return handleHandshakeChangeCipherSpec(clientHello, serverData, conn)
 	}
 
 	return []byte{}
@@ -577,7 +600,7 @@ func handleAlert(clientHello []byte, conn net.Conn) {
 
 }
 
-func handleHandshake(clientHello []byte, serverData *common.ServerData, conn net.Conn) []byte {
+func handleHandshake(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
 
 	handshakeMessageType := TLSHandshakeMessageType(clientHello[5])
 
@@ -594,7 +617,7 @@ func handleHandshake(clientHello []byte, serverData *common.ServerData, conn net
 	return []byte{}
 }
 
-func handleHandshakeClientHello(clientHello []byte, serverData *common.ServerData, conn net.Conn) []byte {
+func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
 
 	// client hello
 	// handshakeLength := int32(clientHello[6])<<16 | int32(clientHello[7])<<8 | int32(clientHello[8])
@@ -663,7 +686,13 @@ func handleHandshakeClientHello(clientHello []byte, serverData *common.ServerDat
 	}
 
 	cipherSuite := []byte{0, 27}
-	serverData.SelectedCipherSuite = 0x001B
+	serverData.CipherDef.CipherSuite = 0x001B
+	fmt.Println("cipher suite")
+	fmt.Println("cipher suite")
+	fmt.Println("cipher suite")
+	fmt.Println(serverData.CipherDef.CipherSuite)
+	fmt.Println("cipher suite")
+	fmt.Println("cipher suite")
 	compressionMethodd := []byte{0}
 	protocolVersion := []byte{3, 0}
 	sessionIdd := byte(0)
@@ -828,10 +857,13 @@ func handleHandshakeClientHello(clientHello []byte, serverData *common.ServerDat
 		return []byte{}
 	}
 
+	getCipherSpecInfo(serverData)
+
 	return []byte{}
 }
 
-func handleHandshakeClientKeyExchange(clientHello []byte, serverData *common.ServerData, conn net.Conn) []byte {
+func handleHandshakeClientKeyExchange(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
+	fmt.Println("handleClientyKeyExchange")
 	// handshakeLength := int32(clientHello[6])<<16 | int32(clientHello[7])<<8 | int32(clientHello[8])
 	// TODO
 	// change cipher spec is zeroing sequence number
@@ -844,7 +876,7 @@ func handleHandshakeClientKeyExchange(clientHello []byte, serverData *common.Ser
 
 	clinetPublicKeyInt := new(big.Int).SetBytes(clientPublicKey)
 
-	sharedSecret := computeSharedSecret(clinetPublicKeyInt, serverData.Private, serverData.P)
+	preMasterSecret := computeSharedSecret(clinetPublicKeyInt, serverData.Private, serverData.P)
 
 	masterKeySeed := []byte{}
 	keyBlockSeed := []byte{}
@@ -856,30 +888,38 @@ func handleHandshakeClientKeyExchange(clientHello []byte, serverData *common.Ser
 	keyBlockSeed = append(keyBlockSeed, serverData.ClientRandom...)
 
 	//Hardcoded for testing
-	masterKey := ssl_prf(sharedSecret.Bytes(), masterKeySeed, 48)
-	keyBlock := ssl_prf(masterKey, keyBlockSeed, 104)
-	macClient := keyBlock[0:20]
-	macServer := keyBlock[20:40]
-	writeKeyClient := keyBlock[40:64]
-	writeKeyServer := keyBlock[64:88]
-	IVClient := keyBlock[88:96]
-	IVServer := keyBlock[96:104]
+	keyBlockLen := serverData.CipherDef.Spec.HashSize*2 + serverData.CipherDef.Spec.KeyMaterial*2 + serverData.CipherDef.Spec.IvSize*2
 
-	serverData.MacClient = macClient
-	serverData.MacServer = macServer
-	serverData.WriteKeyClient = writeKeyClient
-	serverData.WriteKeyServer = writeKeyServer
-	serverData.IVClient = IVClient
-	serverData.IVServer = IVServer
+	masterKey := ssl_prf(preMasterSecret.Bytes(), masterKeySeed, MASTER_SECRET_LENGTH)
+	keyBlock := ssl_prf(masterKey, keyBlockSeed, keyBlockLen)
 
+	macEndIndex := serverData.CipherDef.Spec.HashSize * 2
+	writeKeyEndIndex := macEndIndex + serverData.CipherDef.Spec.KeyMaterial*2
+
+	fmt.Println("hello")
+	fmt.Println("hello")
+	fmt.Println(serverData.CipherDef.Spec.HashSize)
+	fmt.Println(serverData.CipherDef.Spec.KeyMaterial)
+	fmt.Println(serverData.CipherDef.Spec.IvSize)
+
+	// TODO change hardcoded slices
+	// TODO make sure we generate keys in right place
+	cipherDefKeys := s3_cipher.CipherKeys{
+		MacClient:      keyBlock[:serverData.CipherDef.Spec.HashSize],
+		MacServer:      keyBlock[serverData.CipherDef.Spec.HashSize:macEndIndex],
+		WriteKeyClient: keyBlock[macEndIndex : macEndIndex+serverData.CipherDef.Spec.KeyMaterial],
+		WriteKeyServer: keyBlock[serverData.CipherDef.Spec.HashSize*2+serverData.CipherDef.Spec.KeyMaterial : writeKeyEndIndex],
+		IVClient:       keyBlock[writeKeyEndIndex : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize],
+		IVServer:       keyBlock[writeKeyEndIndex+serverData.CipherDef.Spec.IvSize : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize*2],
+	}
+	serverData.CipherDef.Keys = cipherDefKeys
 	serverData.MasterKey = masterKey
-
-	serverData.Shared = sharedSecret
+	serverData.PreMasterSecret = preMasterSecret
 
 	return clientHello[11+clientPublicKeyLength:]
 }
 
-func handleHandshakeClientFinished(clientHello []byte, serverData *common.ServerData, conn net.Conn) []byte {
+func handleHandshakeClientFinished(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
 	// pad1 := byte(0x36)
 	// pad2 := byte(0x5c)
 	// clientBytes := []byte{0x43, 0x4C, 0x4E, 0x54}
@@ -915,4 +955,60 @@ func handleHandshakeClientFinished(clientHello []byte, serverData *common.Server
 
 	// paddd := addCustomPadding(combinedBytes, 64)
 	return []byte{}
+}
+
+func getCipherSpecInfo(serverData *ServerData) {
+	//TODO  fill all data
+	fmt.Println("hello from cipeee1fdffd")
+	switch s3_cipher.TLSCipherSuite(serverData.CipherDef.CipherSuite) {
+	case s3_cipher.TLS_CIPER_SUITE_SSL_RSA_WITH_NULL_SHA:
+
+	case s3_cipher.TLS_CIPER_SUITE_SSL_RSA_WITH_RC4_128_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_RSA_WITH_IDEA_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_RSA_EXPORT_WITH_DES40_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_RSA_WITH_DES_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DH_DSS_EXPORT_WITH_DES40_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DH_DSS_WITH_DES_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DH_DSS_WITH_3DES_EDE_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DH_RSA_EXPORT_WITH_DES40_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DH_RSA_WITH_DES_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DH_RSA_WITH_3DES_EDE_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DHE_DSS_EXPORT_WITH_DES40_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DHE_DSS_WITH_DES_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DH_anon_EXPORT_WITH_DES40_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
+		fmt.Println("hello from cipeee1")
+		serverData.CipherDef.Spec.HashSize = 20
+		serverData.CipherDef.Spec.KeyMaterial = 24
+		serverData.CipherDef.Spec.IvSize = 8
+		break
+	case s3_cipher.TLS_CIPER_SUITE_SSL_FORTEZZA_KEA_WITH_NULL_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_FORTEZZA_KEA_WITH_RC4_128_SHA:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_RSA_EXPORT_WITH_RC4_40_MD5:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_RSA_WITH_NULL_MD5:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_RSA_WITH_RC4_128_MD5:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_RSA_EXPORT_WITH_RC2_CBC_40_MD5:
+	case s3_cipher.TLS_CIPER_SUITE_SSL_DH_anon_EXPORT_WITH_RC4_40_MD5:
+	case s3_cipher.TLS_CIPHER_SUITE_SSL_NULL_WITH_NULL_NULL:
+	default:
+		serverData.CipherDef.Spec.HashSize = 0
+		serverData.CipherDef.Spec.HashSize = 0
+		serverData.CipherDef.Spec.KeyMaterial = 0
+	}
+}
+
+func handleHandshakeChangeCipherSpec(clientHello []byte, serverData *ServerData, conn net.Conn) []byte {
+	fmt.Println("handleClientyCipherspec")
+	message := TLSCipherSpec(clientHello[5])
+	if message == TLSCipherSpecDefault {
+		fmt.Print("Sender is switching to new cipher :)")
+	}
+	serverData.IsEncrypted = true
+	return clientHello[6:]
 }
