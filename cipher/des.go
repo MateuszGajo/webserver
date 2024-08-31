@@ -36,7 +36,7 @@ func Encrypt3DESCBC(key, iv, ciphertext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("ciphertext should be multiplier of block size")
 	}
 
-	mode := cipher.NewCBCDecrypter(block, iv)
+	mode := cipher.NewCBCEncrypter(block, iv)
 	encrypted := make([]byte, len(ciphertext))
 	mode.CryptBlocks(encrypted, ciphertext)
 
@@ -62,11 +62,20 @@ func removeCustomPadding(src []byte, blockSize int) ([]byte, error) {
 func DecryptDesMessage(recordLayerData, encryptedData, writeKey, iv []byte) []byte {
 	encryptedMessage := encryptedData
 
+	fmt.Println("encrypted data")
+	for _, v := range encryptedData {
+		fmt.Printf(" %02X", v)
+	}
+
 	decodedMsg, err := Decrypt3DESCBC(writeKey, iv, encryptedMessage)
 	if err != nil {
 		fmt.Println("problem decrypting data")
 		fmt.Println(err)
 		os.Exit(1)
+	}
+	fmt.Println("encrypted data")
+	for _, v := range encryptedData {
+		fmt.Printf(" %02X", v)
 	}
 	decodedMsgWithoutPadding, err := removeCustomPadding(decodedMsg, 64)
 	if err != nil {
@@ -74,7 +83,8 @@ func DecryptDesMessage(recordLayerData, encryptedData, writeKey, iv []byte) []by
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	decryptedClientHello := recordLayerData
+	decryptedClientHello := []byte{}
+	decryptedClientHello = append(decryptedClientHello, recordLayerData...)
 	decryptedClientHello = append(decryptedClientHello, decodedMsgWithoutPadding...)
 
 	return decryptedClientHello
