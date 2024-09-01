@@ -46,15 +46,18 @@ func Encrypt3DESCBC(key, iv, ciphertext []byte) ([]byte, error) {
 func removeCustomPadding(src []byte, blockSize int) ([]byte, error) {
 	paddingLen := int(src[len(src)-1]) + 1 // openssl did it this way, len of padding is -1
 
+	fmt.Println("padding len")
+	fmt.Println(paddingLen)
+
 	if paddingLen < 1 || paddingLen > blockSize {
 		return nil, fmt.Errorf("invalid padding length")
 	}
 
-	for i := 0; i < paddingLen-1; i++ {
-		if src[len(src)-paddingLen+i] != 0 {
-			return nil, fmt.Errorf("invalid padding byte")
-		}
-	}
+	// for i := 0; i < paddingLen-1; i++ {
+	// 	if src[len(src)-paddingLen+i] != 0 {
+	// 		return nil, fmt.Errorf("invalid padding byte")
+	// 	}
+	// }
 
 	return src[:len(src)-paddingLen], nil
 }
@@ -62,8 +65,8 @@ func removeCustomPadding(src []byte, blockSize int) ([]byte, error) {
 func DecryptDesMessage(recordLayerData, encryptedData, writeKey, iv []byte) []byte {
 	encryptedMessage := encryptedData
 
-	fmt.Println("encrypted data")
-	for _, v := range encryptedData {
+	fmt.Println("IV")
+	for _, v := range iv {
 		fmt.Printf(" %02X", v)
 	}
 
@@ -74,10 +77,10 @@ func DecryptDesMessage(recordLayerData, encryptedData, writeKey, iv []byte) []by
 		os.Exit(1)
 	}
 	fmt.Println("encrypted data")
-	for _, v := range encryptedData {
-		fmt.Printf(" %02X", v)
-	}
-	decodedMsgWithoutPadding, err := removeCustomPadding(decodedMsg, 64)
+	fmt.Println(decodedMsg)
+
+	fmt.Printf("\n encrypted data len: %v \n", len(decodedMsg))
+	decodedMsgWithoutPadding, err := removeCustomPadding(decodedMsg, len(encryptedData))
 	if err != nil {
 		fmt.Println("problem removing padding")
 		fmt.Println(err)

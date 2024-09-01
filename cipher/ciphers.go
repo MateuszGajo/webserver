@@ -48,6 +48,7 @@ func (cipherDef *CipherDef) GenerateServerKeyExchange() []byte {
 		resp = cipherDef.DhParams.GenerateDhParams()
 	case KeyExchangeMethodRSA:
 	case KeyExchangeMethodDHE:
+		return []byte{}
 	default:
 		fmt.Printf("Key exchange parameters not implemented for: %v", cipherDef.Spec.KeyExchange)
 		os.Exit(1)
