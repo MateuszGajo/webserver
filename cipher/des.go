@@ -1,11 +1,14 @@
 package cipher
 
 import (
+	"bytes"
 	"crypto/cipher"
 	"crypto/des"
 	"fmt"
 	"os"
 )
+
+var PADDING_LENGTH = 8
 
 func Decrypt3DESCBC(key, iv, ciphertext []byte) ([]byte, error) {
 	block, err := des.NewTripleDESCipher(key)
@@ -43,11 +46,17 @@ func Encrypt3DESCBC(key, iv, ciphertext []byte) ([]byte, error) {
 	return encrypted, nil
 }
 
+func addCustomPadding(src []byte, blockSize int) []byte {
+	paddingLen := blockSize - len(src)%blockSize
+
+	padtext := bytes.Repeat([]byte{0}, paddingLen-1)
+	// This how openssl implemented this len -1, https://crypto.stackexchange.com/questions/98917/on-the-correctness-of-the-padding-example-of-rfc-5246
+	padtext = append(padtext, byte(paddingLen-1))
+	return append(src, padtext...)
+}
+
 func removeCustomPadding(src []byte, blockSize int) ([]byte, error) {
 	paddingLen := int(src[len(src)-1]) + 1 // openssl did it this way, len of padding is -1
-
-	fmt.Println("padding len")
-	fmt.Println(paddingLen)
 
 	if paddingLen < 1 || paddingLen > blockSize {
 		return nil, fmt.Errorf("invalid padding length")
@@ -62,13 +71,8 @@ func removeCustomPadding(src []byte, blockSize int) ([]byte, error) {
 	return src[:len(src)-paddingLen], nil
 }
 
-func DecryptDesMessage(recordLayerData, encryptedData, writeKey, iv []byte) []byte {
+func DecryptDesMessage(encryptedData, writeKey, iv []byte) []byte {
 	encryptedMessage := encryptedData
-
-	fmt.Println("IV")
-	for _, v := range iv {
-		fmt.Printf(" %02X", v)
-	}
 
 	decodedMsg, err := Decrypt3DESCBC(writeKey, iv, encryptedMessage)
 	if err != nil {
@@ -76,19 +80,35 @@ func DecryptDesMessage(recordLayerData, encryptedData, writeKey, iv []byte) []by
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	fmt.Println("encrypted data")
-	fmt.Println(decodedMsg)
 
-	fmt.Printf("\n encrypted data len: %v \n", len(decodedMsg))
 	decodedMsgWithoutPadding, err := removeCustomPadding(decodedMsg, len(encryptedData))
 	if err != nil {
 		fmt.Println("problem removing padding")
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	decryptedClientHello := []byte{}
-	decryptedClientHello = append(decryptedClientHello, recordLayerData...)
-	decryptedClientHello = append(decryptedClientHello, decodedMsgWithoutPadding...)
 
-	return decryptedClientHello
+	return decodedMsgWithoutPadding
+}
+
+func roundUpToMultiple(length, multiple int) int {
+	if length%multiple == 0 {
+		return length + multiple
+	}
+	return ((length / multiple) + 1) * multiple
+}
+
+func EncryptDesMessage(data, writeKey, iv []byte) []byte {
+	padLength := roundUpToMultiple(len(data), PADDING_LENGTH)
+
+	dataPadded := addCustomPadding(data, padLength)
+
+	encryptedMsg, err := Encrypt3DESCBC(writeKey, iv, dataPadded)
+	if err != nil {
+		fmt.Println("problem decrypting data")
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	return encryptedMsg
 }

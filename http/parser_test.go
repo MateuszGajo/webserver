@@ -27,7 +27,7 @@ func TestFullAndPartialMsg(t *testing.T) {
 	output, partialOut, _ := Parser(msg)
 
 	if !reflect.DeepEqual(fullMsg, output[0]) {
-		t.Errorf("output should have fullMsg content at index 0. Expected: %v insted we got: %v", fullMsg[5:], output[0])
+		t.Errorf("output should have fullMsg content at index 0. Expected: %v insted we got: %v", fullMsg, output[0])
 	}
 
 	if !reflect.DeepEqual(partialMsg, partialOut) {
@@ -62,10 +62,10 @@ func TestParseMultipleMsg(t *testing.T) {
 	output, _, _ := Parser(msg)
 
 	if !reflect.DeepEqual(fullMsgOne, output[0]) {
-		t.Errorf("output should have fullMsg content at index 0. Expected: %v insted we got: %v", fullMsgOne[5:], output[0])
+		t.Errorf("output should have fullMsg content at index 0. Expected: %v insted we got: %v", fullMsgOne, output[0])
 	}
 
 	if !reflect.DeepEqual(fullMsgTwo, output[1]) {
-		t.Errorf("output should have fullMsg content at index 0. Expected: %v insted we got: %v", fullMsgTwo[5:], output[0])
+		t.Errorf("output should have fullMsg content at index 0. Expected: %v insted we got: %v", fullMsgTwo, output[0])
 	}
 }

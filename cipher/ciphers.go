@@ -6,13 +6,27 @@ import (
 	"os"
 )
 
-func DecryptMessage(recordLayerData []byte, encryptedData []byte, cipherSuite uint16, writeKey, iv []byte) []byte {
+func DecryptMessage(encryptedData []byte, cipherSuite uint16, writeKey, iv []byte) []byte {
 
 	switch TLSCipherSuite(cipherSuite) {
 	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
-		return DecryptDesMessage(recordLayerData, encryptedData, writeKey, iv)
+		return DecryptDesMessage(encryptedData, writeKey, iv)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherSuite)
+		os.Exit(1)
+
+	}
+
+	return []byte{}
+}
+
+func (cipherDef *CipherDef) EncryptMessage(data []byte) []byte {
+
+	switch TLSCipherSuite(cipherDef.CipherSuite) {
+	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
+		return EncryptDesMessage(data, cipherDef.Keys.WriteKeyServer, cipherDef.Keys.IVServer)
+	default:
+		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
 		os.Exit(1)
 
 	}
@@ -61,6 +75,9 @@ func (cipherDef *CipherDef) SelectCipherSuite() []byte {
 
 	// TODO implement this
 	cipherDef.CipherSuite = 0x001B
+
+	// TODO should also setup this
+	cipherDef.GetCipherSpecInfo()
 
 	return []byte{0, 27}
 

@@ -256,8 +256,6 @@ func HandleConnection(conn net.Conn) {
 		}
 	}
 
-	// clientHello := []byte{22, 3, 0, 0, 69, 1, 0, 0, 65, 3, 0, 102, 238, 138, 0, 43, 72, 173, 88, 26, 125, 182, 44, 4, 213, 158, 0, 30, 230, 195, 164, 44, 133, 177, 179, 138, 219, 68, 93, 157, 71, 88, 163, 127, 0, 0, 14, 0}
-
 }
 
 // TODO make this a one function with algorithm passed as argument
@@ -383,27 +381,27 @@ func addCustomPadding(src []byte, blockSize int) []byte {
 }
 
 func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) {
+	fmt.Println("enter again")
 	contentType := clientHello[0]
 
-	version := binary.BigEndian.Uint16(clientHello[1:3])
-	recordLength := binary.BigEndian.Uint16(clientHello[3:5])
-	fmt.Print("lets go handshake content type \n")
-	fmt.Println(contentType)
-	switch version {
-	case 0x0200:
-		fmt.Print("SSL 2.0")
-	case 0x0300:
-		fmt.Print("SSL 3.0")
-	}
+	// recordLength := binary.BigEndian.Uint16(clientHello[3:5])
+
+	clientData := clientHello[5:]
 
 	// record length is only 2 bytes while handshake can be 3 bytes, when that happend two request are transmited and reasmbled into one
 
 	if serverData.IsEncrypted {
-		fmt.Println("before encryption")
-		fmt.Println(clientHello)
 		iv := make([]byte, 8)
 		copy(iv, clientHello[len(clientHello)-8:])
-		clientHello = s3_cipher.DecryptMessage(clientHello[:5], clientHello[5:], serverData.CipherDef.CipherSuite, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+		aa := []byte{}
+		aa = append(aa, clientHello[:5]...)
+		aaReturn := s3_cipher.DecryptMessage(clientHello[5:], serverData.CipherDef.CipherSuite, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+		clientHello = append(aa, aaReturn...)
+		clientData = aaReturn
+		fmt.Println("client data")
+		fmt.Println("client data")
+		fmt.Println("client data")
+		fmt.Println(clientData)
 		// TODO: Frst fix iv for the client, then verify cipher for all messages.
 		serverData.CipherDef.Keys.IVClient = iv
 
@@ -412,24 +410,12 @@ func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) {
 
 			// Lets assume we only parsing one
 			// TODO: write a parser
-			contentLength := int(recordLength) - (len(clientHello) - 5)
-			fmt.Printf("\n content length: %d \n", contentLength)
-			macSent := clientHello[5+contentLength : 5+contentLength+serverData.CipherDef.Spec.HashSize]
-			dataSent := clientHello[5 : 5+contentLength]
+			// contentLength := int(recordLength) - (len(clientHello) - 5)
+			// fmt.Printf("\n content length: %d \n", contentLength)
+			// macSent := clientHello[5+contentLength : 5+contentLength+serverData.CipherDef.Spec.HashSize]
+			// dataSent := clientHello[5 : 5+contentLength]
 
-			streamCipher := serverData.generateStreamCipher([]byte{byte(contentType)}, clientHello[5:7], serverData.ClientSeqNum, serverData.CipherDef.Keys.MacClient)
-
-			fmt.Println("client hello")
-			fmt.Println(clientHello)
-
-			fmt.Println("mac sent")
-			fmt.Println(macSent)
-
-			fmt.Println("dat sent")
-			fmt.Println(dataSent)
-
-			fmt.Println("cipher")
-			fmt.Println(streamCipher)
+			// streamCipher := serverData.generateStreamCipher([]byte{byte(contentType)}, clientHello[5:7], serverData.ClientSeqNum, serverData.CipherDef.Keys.MacClient)
 
 		}
 		// Make sure its the right place, there can be more than one message decode here
@@ -443,37 +429,70 @@ func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) {
 	}
 	// TODO: don't this this weird condition
 	// we should be able to put it after handlehandshkae when we change logic to recive singular message
-	if clientHello[0] != 20 && clientHello[5] != 20 {
-		serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientHello[5:5+recordLength])
-	}
 
 	if contentType == byte(TLSContentTypeHandshake) {
-		handleHandshake(clientHello, serverData, conn)
+
+		handshakeLength := int32(clientData[1])<<16 | int32(clientData[2])<<8 | int32(clientData[3])
+		serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientData[:handshakeLength+4])
+		msgs := handleHandshake(clientData, serverData, conn)
+
+		if len(msgs) > 0 {
+			fmt.Println("msgs")
+			fmt.Println(msgs)
+			// fmt.Println(msg[:47])
+			// fmt.Println(msg[47 : 18+47])
+			// fmt.Println(msg[18+47:])
+			// _, err := conn.Write(msg[:47])
+			// if err != nil {
+			// 	fmt.Println("Error reading Client Hello1:", err)
+			// 	os.Exit(1)
+			// }
+			// _, err = conn.Write(msg[47 : 18+47])
+			// if err != nil {
+			// 	fmt.Println("Error reading Client Hello2:", err)
+			// 	os.Exit(1)
+			// }
+			// _, err = conn.Write(msg[18+47:])
+
+			for _, v := range msgs {
+				fmt.Println("msg")
+				fmt.Println(v)
+				_, err := conn.Write(v)
+				serverData.HandshakeMessages = append(serverData.HandshakeMessages, v[5:])
+				if err != nil {
+					fmt.Println("Error reading Client Hello:", err)
+					os.Exit(1)
+				}
+			}
+
+		}
+
 	} else if contentType == byte(TLSContentTypeAlert) {
-		alertLevel := TlSAlertLevel(clientHello[5])
-		handleAlert(clientHello, conn)
+		alertLevel := TlSAlertLevel(clientData[0])
+		handleAlert(clientData, conn)
 		if alertLevel == TLSAlertLevelfatal {
 			conn.Close()
 		}
 	} else if contentType == byte(TLSContentTypeChangeCipherSpec) {
+		fmt.Println("enter again")
 		// The change cipher spec message is sent by both the client and the server to notify the reciing part that subsequent record will be protected under the just-negotiated cipherspec and keys. Copy pending state into currnet.
 		// *When resuming a previous sessin, the change cipher spec message is sent after the hello
 		// majorVersion := clientHello[1]
 		// minorVersion := clientHello[2]
 		// length := clientHello[3:4]
-		handleHandshakeChangeCipherSpec(clientHello, serverData, conn)
+		handleHandshakeChangeCipherSpec(clientData, serverData, conn)
 	} else {
 		fmt.Println("unknown type!!! type:" + string(contentType))
 	}
 
 }
 
-func handleAlert(clientHello []byte, conn net.Conn) {
+func handleAlert(clientData []byte, conn net.Conn) {
 	// majorVersion := clientHello[1]
 	// minorVersion := clientHello[2]
 	// length := clientHello[3:4]
 	// alertLevel := TlSAlertLevel(clientHello[5])
-	alertDescription := TLSAlertDescription(clientHello[6])
+	alertDescription := TLSAlertDescription(clientData[1])
 
 	switch alertDescription {
 	case TLSAlertDescriptionCloseNotify:
@@ -548,30 +567,56 @@ func handleAlert(clientHello []byte, conn net.Conn) {
 
 }
 
-func handleHandshake(clientHello []byte, serverData *ServerData, conn net.Conn) {
+func handleHandshake(clientData []byte, serverData *ServerData, conn net.Conn) [][]byte {
 
-	handshakeMessageType := TLSHandshakeMessageType(clientHello[5])
+	handshakeMessageType := TLSHandshakeMessageType(clientData[0])
 
 	if handshakeMessageType == TLSHandshakeMessageClientHello {
-		handleHandshakeClientHello(clientHello, serverData, conn)
+		handleHandshakeClientHello(clientData, serverData, conn)
+		serverHelloOutput := serverHello(serverData)
+
+		resp := make([][]byte, 0)
+
+		resp = append(resp, serverHelloOutput)
+
+		serverKeyExchangeOutput := serverKeyExchange(serverData)
+
+		resp = append(resp, serverKeyExchangeOutput)
+
+		// serverData.HandshakeMessages = append(serverData.HandshakeMessages, resp[5:])
+
+		serverHelloDoneOutput := serverHelloDone(serverData)
+
+		resp = append(resp, serverHelloDoneOutput)
+
+		return resp
 	} else if handshakeMessageType == TLSHandshakeMessageClientKeyExchange {
 
-		handleHandshakeClientKeyExchange(clientHello, serverData, conn)
+		handleHandshakeClientKeyExchange(clientData, serverData, conn)
 
 	} else if handshakeMessageType == TLSHandshakeMessageFinished {
-		handleHandshakeClientFinished(clientHello, serverData, conn)
+		handleHandshakeClientFinished(clientData, serverData, conn)
+
+		resp := make([][]byte, 0)
+
+		// change cipher message
+		changeCipher := changeCipher()
+
+		resp = append(resp, changeCipher)
+
+		serverFinished := serverFinished(serverData)
+
+		resp = append(resp, serverFinished)
+
+		return resp
 
 	}
+	return [][]byte{}
 }
 
-func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn net.Conn) {
+func handleHandshakeClientHello(clientData []byte, serverData *ServerData, conn net.Conn) {
 
-	// conn.Write([]byte{21, 3, 0, 0, 2, 1, 0})
-
-	// client hello
-	// handshakeLength := int32(clientHello[6])<<16 | int32(clientHello[7])<<8 | int32(clientHello[8])
-
-	clientVersion := binary.BigEndian.Uint16(clientHello[9:11]) // backward compability, used to dicated which version to use, now there is set in protocol version and newest one is chosen.
+	clientVersion := binary.BigEndian.Uint16(clientData[4:6]) // backward compability, used to dicated which version to use, now there is set in protocol version and newest one is chosen.
 
 	switch clientVersion {
 	case 0x0200:
@@ -581,23 +626,17 @@ func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn
 	}
 
 	//client random
-	fmt.Println(clientHello[11:15])
-	radnomBytesTime := binary.BigEndian.Uint32(clientHello[11:15])
-	radnomBytesData := clientHello[15:43]
-	serverData.ClientRandom = clientHello[11:43]
+	fmt.Println(clientData[11:15])
+	radnomBytesTime := binary.BigEndian.Uint32(clientData[6:10])
+	radnomBytesData := clientData[10:38]
+	serverData.ClientRandom = clientData[6:38]
 
 	fmt.Println("Unix time")
 	fmt.Println(time.Unix(int64(radnomBytesTime), 0))
 	fmt.Println("random bytes")
 	fmt.Println(radnomBytesData)
-	//session id
-	// session := clientHello[43]
 
-	//cipher suites
-	// cipherSuiteLength := binary.BigEndian.Uint16(clientHello[44:46])
-	// cipherSuites := clientHello[46 : 46+cipherSuiteLength]
-
-	if clientHello[44] == 255 {
+	if clientData[39] == 255 {
 		//
 		//    Note: All cipher suites whose first byte is 0xFF are considered
 		//    private and can be used for defining local/experimental algorithms.
@@ -605,8 +644,39 @@ func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn
 	} else {
 		// other encryptions
 	}
-	// compression mehod
-	// compressionMethod := clientHello[46+cipherSuiteLength]
+
+}
+
+func serverKeyExchange(serverData *ServerData) []byte {
+
+	serverKeyExchange := []byte{}
+
+	keyExchangeData := serverData.CipherDef.GenerateServerKeyExchange()
+	// Send key exchange message
+	// TODO: write better logic for it
+	// maybe lets put ino another function for now
+	if len(keyExchangeData) > 1 {
+		handshakeLengthh := len(keyExchangeData)
+		handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(handshakeLengthh)
+		if err != nil {
+			fmt.Print("err while converting to big endina")
+		}
+		recordLengthByte := helpers.Int32ToBigEndian(handshakeLengthh + 4)
+
+		serverKeyExchange = append(serverKeyExchange, byte(TLSContentTypeHandshake))
+
+		serverKeyExchange = append(serverKeyExchange, serverData.SSLVersion...)
+		serverKeyExchange = append(serverKeyExchange, recordLengthByte...)
+		serverKeyExchange = append(serverKeyExchange, byte(TLSHandshakeMessageServerKeyExchange))
+		serverKeyExchange = append(serverKeyExchange, handshakeLengthByte...)
+		serverKeyExchange = append(serverKeyExchange, keyExchangeData...)
+
+	}
+
+	return serverKeyExchange
+}
+
+func serverHello(serverData *ServerData) []byte {
 
 	currentTime := time.Now()
 	unixTime := currentTime.Unix()
@@ -625,7 +695,7 @@ func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn
 	cipherSuite := serverData.CipherDef.SelectCipherSuite()
 	compressionMethod := serverData.CipherDef.SelectCompressionMethod()
 	protocolVersion := serverData.SSLVersion
-	// TODO make session work, we can focus on it later, first implemen another alogrithm
+	// TODO make session work, we can focus on it later, first implement another alogrithm
 	sessionId := byte(0)
 	//                  time				random bytes	 session id cypher suit	  compression methodd
 	handshakeLength := len(unitTimeBytes) + len(randomBytes) + 1 + len(cipherSuite) + len(compressionMethod) + len(protocolVersion)
@@ -638,77 +708,40 @@ func handleHandshakeClientHello(clientHello []byte, serverData *ServerData, conn
 
 	recordLengthByte := helpers.Int32ToBigEndian(handshakeLength + 4)
 
-	serverHelloMsg := []byte{byte(TLSContentTypeHandshake)}
-	serverHelloMsg = append(serverHelloMsg, serverData.SSLVersion...)
-	serverHelloMsg = append(serverHelloMsg, recordLengthByte...)
-	serverHelloMsg = append(serverHelloMsg, byte(TLSHandshakeMessageServerHello))
-	serverHelloMsg = append(serverHelloMsg, handshakeLengthByte...) // 3 bytes
-	serverHelloMsg = append(serverHelloMsg, protocolVersion...)
-	serverHelloMsg = append(serverHelloMsg, unitTimeBytes...)
-	serverHelloMsg = append(serverHelloMsg, randomBytes...)
-	serverHelloMsg = append(serverHelloMsg, sessionId)
-	serverHelloMsg = append(serverHelloMsg, cipherSuite...)
-	serverHelloMsg = append(serverHelloMsg, compressionMethod...)
+	serverHello := []byte{byte(TLSContentTypeHandshake)}
+	serverHello = append(serverHello, serverData.SSLVersion...)
+	serverHello = append(serverHello, recordLengthByte...)
+	serverHello = append(serverHello, byte(TLSHandshakeMessageServerHello))
+	serverHello = append(serverHello, handshakeLengthByte...) // 3 bytes
+	serverHello = append(serverHello, protocolVersion...)
+	serverHello = append(serverHello, unitTimeBytes...)
+	serverHello = append(serverHello, randomBytes...)
+	serverHello = append(serverHello, sessionId)
+	serverHello = append(serverHello, cipherSuite...)
+	serverHello = append(serverHello, compressionMethod...)
 
-	_, err = conn.Write(serverHelloMsg)
-	if err != nil {
-		fmt.Println("Error reading Client Hello:", err)
-		os.Exit(1)
-	}
-
-	serverData.CipherDef.GetCipherSpecInfo()
 	serverData.ServerRandom = append(unitTimeBytes, randomBytes...)
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHelloMsg[5:])
 
-	keyExchangeData := serverData.CipherDef.GenerateServerKeyExchange()
-	// Send key exchange message
-	// TODO: write better logic for it
-	// maybe lets put ino another function for now
-	if len(keyExchangeData) > 1 {
-		handshakeLengthh := len(keyExchangeData)
-		handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(handshakeLengthh)
-		if err != nil {
-			fmt.Print("err while converting to big endina")
-		}
-		recordLengthByte := helpers.Int32ToBigEndian(handshakeLengthh + 4)
-
-		serverKeyExchangeMsg := []byte{byte(TLSContentTypeHandshake)}
-		serverKeyExchangeMsg = append(serverKeyExchangeMsg, serverData.SSLVersion...)
-		serverKeyExchangeMsg = append(serverKeyExchangeMsg, recordLengthByte...)
-		serverKeyExchangeMsg = append(serverKeyExchangeMsg, byte(TLSHandshakeMessageServerKeyExchange))
-		serverKeyExchangeMsg = append(serverKeyExchangeMsg, handshakeLengthByte...)
-		serverKeyExchangeMsg = append(serverKeyExchangeMsg, keyExchangeData...)
-
-		_, err = conn.Write(serverKeyExchangeMsg)
-		serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverKeyExchangeMsg[5:])
-		if err != nil {
-			fmt.Println("Error reading Client Hello:", err)
-			os.Exit(1)
-		}
-	}
-
-	serverHelloDoneMsg := []byte{byte(TLSContentTypeHandshake)}
-	serverHelloDoneMsg = append(serverHelloDoneMsg, serverData.SSLVersion...)
-	serverHelloDoneMsg = append(serverHelloDoneMsg, []byte{0, 4}...) // hardcoded as it is always 4 bytes, 1 byte messageType 3 bytes length
-	serverHelloDoneMsg = append(serverHelloDoneMsg, byte(TLSHandshakeMessageServerHelloDone))
-	serverHelloDoneMsg = append(serverHelloDoneMsg, []byte{0, 0, 0}...) // Always 0 length
-
-	_, err = conn.Write(serverHelloDoneMsg)
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHelloDoneMsg[5:])
-	if err != nil {
-		fmt.Println("Error reading Client Hello:", err)
-		os.Exit(1)
-	}
-
+	return serverHello
 }
 
-func handleHandshakeClientKeyExchange(clientHello []byte, serverData *ServerData, conn net.Conn) {
+func serverHelloDone(serverData *ServerData) []byte {
+	serverHelloDone := []byte{byte(TLSContentTypeHandshake)}
+	serverHelloDone = append(serverHelloDone, serverData.SSLVersion...)
+	serverHelloDone = append(serverHelloDone, []byte{0, 4}...) // hardcoded as it is always 4 bytes, 1 byte messageType 3 bytes length
+	serverHelloDone = append(serverHelloDone, byte(TLSHandshakeMessageServerHelloDone))
+	serverHelloDone = append(serverHelloDone, []byte{0, 0, 0}...) // Always 0 length
+
+	return serverHelloDone
+}
+
+func handleHandshakeClientKeyExchange(clientData []byte, serverData *ServerData, conn net.Conn) {
 	fmt.Println("handleClientyKeyExchange")
 	// handshakeLength := int32(clientHello[6])<<16 | int32(clientHello[7])<<8 | int32(clientHello[8])
 	// TODO
 	// change cipher spec is zeroing sequence number
-	clientPublicKeyLength := binary.BigEndian.Uint16(clientHello[9:11])
-	clientPublicKey := clientHello[11 : 11+clientPublicKeyLength]
+	clientPublicKeyLength := binary.BigEndian.Uint16(clientData[4:6])
+	clientPublicKey := clientData[6 : 6+clientPublicKeyLength]
 
 	clinetPublicKeyInt := new(big.Int).SetBytes(clientPublicKey)
 	serverData.CipherDef.DhParams.ClientPublic = clinetPublicKeyInt
@@ -740,24 +773,23 @@ func handleHandshakeClientKeyExchange(clientHello []byte, serverData *ServerData
 		IVServer:       keyBlock[writeKeyEndIndex+serverData.CipherDef.Spec.IvSize : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize*2],
 	}
 
-	fmt.Println("``````````````````````````")
-	fmt.Println("override of iv client")
-	fmt.Println("``````````````````````````")
-
 	serverData.CipherDef.Keys = cipherDefKeys
 	serverData.MasterKey = masterKey
 	serverData.PreMasterSecret = preMasterSecret
 
 }
 
-func handleHandshakeClientFinished(clientHello []byte, serverData *ServerData, conn net.Conn) {
+func changeCipher() []byte {
+	return []byte{20, 3, 0, 0, 1, 1}
+}
 
-	clientBytes := helpers.Int64ToBIgEndian(int64(ClientSender))
+func serverFinished(serverData *ServerData) []byte {
+	serverBytes := helpers.Int64ToBIgEndian(int64(serverSender))
 
-	clientVerifyHash := []byte{}
+	verifyHashMac := []byte{}
 
-	md5Hash := generate_finished_handshake_mac(md5.New(), serverData.MasterKey, clientBytes, serverData.HandshakeMessages)
-	shaHash := generate_finished_handshake_mac(sha1.New(), serverData.MasterKey, clientBytes, serverData.HandshakeMessages)
+	md5Hash := generate_finished_handshake_mac(md5.New(), serverData.MasterKey, serverBytes, serverData.HandshakeMessages)
+	shaHash := generate_finished_handshake_mac(sha1.New(), serverData.MasterKey, serverBytes, serverData.HandshakeMessages)
 
 	hashLen := len(md5Hash) + len(shaHash)
 	msgLenEndian, err := helpers.IntTo3BytesBigEndian(hashLen)
@@ -767,66 +799,14 @@ func handleHandshakeClientFinished(clientHello []byte, serverData *ServerData, c
 		os.Exit(1)
 	}
 
-	clientVerifyHash = append(clientVerifyHash, md5Hash...)
-	clientVerifyHash = append(clientVerifyHash, shaHash...)
+	verifyHashMac = append(verifyHashMac, md5Hash...)
+	verifyHashMac = append(verifyHashMac, shaHash...)
 
-	hashAndHeader := []byte{byte(TLSHandshakeMessageFinished)}
-	hashAndHeader = append(hashAndHeader, msgLenEndian...)
-	hashAndHeader = append(hashAndHeader, clientVerifyHash...)
+	verifyMacWithHeaders := []byte{byte(TLSHandshakeMessageFinished)}
+	verifyMacWithHeaders = append(verifyMacWithHeaders, msgLenEndian...)
+	verifyMacWithHeaders = append(verifyMacWithHeaders, verifyHashMac...)
 
-	// Stream cipher should be verified above???????
-	// TODO: verify just md5hash and shaHash
-
-	streamCipher := serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, hashAndHeader, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacClient)
-
-	combinedBytes := []byte{}
-	combinedBytes = append(combinedBytes, hashAndHeader...)
-	combinedBytes = append(combinedBytes, streamCipher...)
-
-	clientHelloLength := int(clientHello[8])
-	msg := clientHello[5 : 5+clientHelloLength+4]
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, msg)
-
-	if !reflect.DeepEqual(combinedBytes, clientHello[5:]) {
-		// TODO Need to throw some error/alert\
-		fmt.Println("message are different")
-		os.Exit(1)
-
-	}
-
-	// change cipher message
-	_, err = conn.Write([]byte{20, 3, 0, 0, 1, 1})
-
-	if err != nil {
-		fmt.Println("Can't send change cipher message")
-		os.Exit(1)
-	}
-
-	// TODO: put into another function sending server verify
-
-	serverBytes := helpers.Int64ToBIgEndian(int64(serverSender))
-
-	clientVerifyHash = []byte{}
-
-	md5Hash = generate_finished_handshake_mac(md5.New(), serverData.MasterKey, serverBytes, serverData.HandshakeMessages)
-	shaHash = generate_finished_handshake_mac(sha1.New(), serverData.MasterKey, serverBytes, serverData.HandshakeMessages)
-
-	hashLen = len(md5Hash) + len(shaHash)
-	msgLenEndian, err = helpers.IntTo3BytesBigEndian(hashLen)
-
-	if err != nil {
-		fmt.Printf("Problem converting hash len into endian format")
-		os.Exit(1)
-	}
-
-	clientVerifyHash = append(clientVerifyHash, md5Hash...)
-	clientVerifyHash = append(clientVerifyHash, shaHash...)
-
-	hashAndHeader = []byte{byte(TLSHandshakeMessageFinished)}
-	hashAndHeader = append(hashAndHeader, msgLenEndian...)
-	hashAndHeader = append(hashAndHeader, clientVerifyHash...)
-
-	streamCipher = serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, hashAndHeader, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
+	mac := serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, verifyMacWithHeaders, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
 
 	for i := 7; i >= 0; i-- {
 		serverData.ServerSeqNum[i] += 1
@@ -835,57 +815,60 @@ func handleHandshakeClientFinished(clientHello []byte, serverData *ServerData, c
 		}
 	}
 
-	combinedBytes = []byte{}
-	combinedBytes = append(combinedBytes, hashAndHeader...)
-	combinedBytes = append(combinedBytes, streamCipher...)
+	combinedBytes := []byte{}
+	combinedBytes = append(combinedBytes, verifyMacWithHeaders...)
+	combinedBytes = append(combinedBytes, mac...)
 
-	// can't hardcode 64, should fill every 8 bytes
-	combinedBytesPadded := addCustomPadding(combinedBytes, 64)
-	for _, v := range serverData.CipherDef.Keys.IVServer {
-		fmt.Printf(" %02X", v)
-	}
-	encryptedMsg, err := s3_cipher.Encrypt3DESCBC(serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer, combinedBytesPadded)
+	encryptedMsg := serverData.CipherDef.EncryptMessage(combinedBytes)
 
 	if err != nil {
 		fmt.Println("problem encrypting data")
 		fmt.Println(err)
+		os.Exit(1)
 	}
-
-	resp := []byte{22, 3, 0, 0, byte(len(encryptedMsg))}
-	resp = append(resp, encryptedMsg...)
-
-	for _, v := range resp {
-		fmt.Printf(" %02X", v)
-	}
+	serverFinished := []byte{byte(TLSContentTypeHandshake), 3, 0, 0, byte(len(encryptedMsg))}
+	serverFinished = append(serverFinished, encryptedMsg...)
 
 	// let's think about sending messages
 	// TODO: lets maybe return just bytes, and have another function to send it and there get iv, update  seq number etc...
+	serverData.CipherDef.Keys.IVServer = serverFinished[61:69]
 
-	serverData.CipherDef.Keys.IVServer = resp[61:69]
-	_, err = conn.Write(resp)
+	return serverFinished
+}
 
-	if err != nil {
-		fmt.Print("Couldn't send change cipher spec message")
+func handleHandshakeClientFinished(clientData []byte, serverData *ServerData, conn net.Conn) [][]byte {
+
+	clientBytes := helpers.Int64ToBIgEndian(int64(ClientSender))
+
+	clientHash := []byte{}
+
+	md5Hash := generate_finished_handshake_mac(md5.New(), serverData.MasterKey, clientBytes, serverData.HandshakeMessages[:len(serverData.HandshakeMessages)-1])  // -1 without last message witch is client verify
+	shaHash := generate_finished_handshake_mac(sha1.New(), serverData.MasterKey, clientBytes, serverData.HandshakeMessages[:len(serverData.HandshakeMessages)-1]) // -1 without last message witch is client verify
+
+	hashLen := len(md5Hash) + len(shaHash)
+
+	clientHash = append(clientHash, md5Hash...)
+	clientHash = append(clientHash, shaHash...)
+
+	// 4 bytes, 1 handshake type, 3 byes length
+	inputHash := clientData[4:]
+
+	if !reflect.DeepEqual(clientHash, inputHash[:hashLen]) {
+		// TODO Need to throw some error/alert\
+		fmt.Println("message are different")
+		fmt.Println(clientData[:hashLen])
+		os.Exit(1)
+
 	}
 
-	newww(serverData, conn)
-	newww(serverData, conn)
-	newww(serverData, conn)
-	newww(serverData, conn)
-	newww(serverData, conn)
-	newww(serverData, conn)
-	tmpCloseAlert(serverData, conn)
+	return [][]byte{}
+
 }
 
 func newww(serverData *ServerData, conn net.Conn) {
 	content := []byte{1, 0}
 
 	streamCipher := serverData.generateStreamCipher([]byte{byte(TLSContentTypeApplicationData)}, content, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
-
-	fmt.Println("\ncipher")
-	for _, v := range streamCipher {
-		fmt.Printf(" %02X", v)
-	}
 
 	for i := 7; i >= 0; i-- {
 		serverData.ServerSeqNum[i] += 1
@@ -899,14 +882,7 @@ func newww(serverData *ServerData, conn net.Conn) {
 	combinedBytes = append(combinedBytes, streamCipher...)
 
 	combinedBytesPadded := addCustomPadding(combinedBytes, 24)
-	fmt.Println("padded byteds")
-	fmt.Println(combinedBytesPadded)
-	fmt.Println("len")
-	fmt.Println(len(combinedBytesPadded))
-	for _, v := range combinedBytesPadded {
-		fmt.Printf(" %02X", v)
-	}
-	fmt.Println(combinedBytesPadded)
+
 	// the problem is that decoded bytes on openssl are diffrent that ones produces here
 	encryptedMsg, err := s3_cipher.Encrypt3DESCBC(serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer, combinedBytesPadded)
 
@@ -919,18 +895,6 @@ func newww(serverData *ServerData, conn net.Conn) {
 	resp = append(resp, encryptedMsg...)
 	serverData.CipherDef.Keys.IVServer = resp[21:29]
 	// serverData.CipherDef.Keys.IVClient = resp[21:29]
-
-	fmt.Println("IV VECTOR")
-	fmt.Println("IV VECTOR")
-	for _, v := range serverData.CipherDef.Keys.IVServer {
-		fmt.Printf(" %02X", v)
-	}
-
-	fmt.Println("ENCYRYPTED!!!! resp")
-	fmt.Println(resp)
-	for _, v := range resp {
-		fmt.Printf(" %02X", v)
-	}
 
 	_, err = conn.Write(resp)
 
@@ -983,9 +947,9 @@ func tmpCloseAlert(serverData *ServerData, conn net.Conn) {
 
 }
 
-func handleHandshakeChangeCipherSpec(clientHello []byte, serverData *ServerData, conn net.Conn) {
+func handleHandshakeChangeCipherSpec(clientData []byte, serverData *ServerData, conn net.Conn) {
 
-	message := TLSCipherSpec(clientHello[5])
+	message := TLSCipherSpec(clientData[0])
 	if message == TLSCipherSpecDefault {
 		fmt.Print("Sender is switching to new cipher :)")
 	}
