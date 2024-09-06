@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 )
 
 func Parser(clientHello []byte) (output [][]byte, rest []byte, err error) {
@@ -20,6 +21,7 @@ func Parser(clientHello []byte) (output [][]byte, rest []byte, err error) {
 		contentType := clientHello[0]
 		if contentType < byte(TLSContentTypeChangeCipherSpec) || contentType > byte(TLSContentTypeApplicationData) {
 			// TODO send alert here
+			fmt.Println(clientHello)
 			err = errors.New("invalid content type")
 			return output, rest, err
 		}

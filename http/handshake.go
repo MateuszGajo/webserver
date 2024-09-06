@@ -1,7 +1,6 @@
 package http
 
 import (
-	"bytes"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha1"
@@ -117,6 +116,12 @@ const (
 	TLSContentTypeChangeCipherSpec TlSContentType = 20
 	// to help avoid pipeline stalls, changeciperspec is independet ssl protocl type
 	// Treated as its own conten type a not handshake massage it can be proceessed independently of the handshake flow this allow to iimmedietly recognize that
+)
+
+type SSLVersion uint16
+
+const (
+	SSL30Version = 0x0300
 )
 
 type TLSAlertDescription byte
@@ -371,54 +376,41 @@ func (serverData *ServerData) generateStreamCipher(dataCompressedType, sslCompre
 	return hashFunc.Sum(nil)
 }
 
-func addCustomPadding(src []byte, blockSize int) []byte {
-	paddingLen := blockSize - len(src)%blockSize
-
-	padtext := bytes.Repeat([]byte{0}, paddingLen-1)
-	// This how openssl implemented this len -1, https://crypto.stackexchange.com/questions/98917/on-the-correctness-of-the-padding-example-of-rfc-5246
-	padtext = append(padtext, byte(paddingLen-1))
-	return append(src, padtext...)
-}
-
 func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) {
 	fmt.Println("enter again")
 	contentType := clientHello[0]
-
 	// recordLength := binary.BigEndian.Uint16(clientHello[3:5])
-
 	clientData := clientHello[5:]
 
-	// record length is only 2 bytes while handshake can be 3 bytes, when that happend two request are transmited and reasmbled into one
-
 	if serverData.IsEncrypted {
-		iv := make([]byte, 8)
-		copy(iv, clientHello[len(clientHello)-8:])
-		aa := []byte{}
-		aa = append(aa, clientHello[:5]...)
-		aaReturn := s3_cipher.DecryptMessage(clientHello[5:], serverData.CipherDef.CipherSuite, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
-		clientHello = append(aa, aaReturn...)
-		clientData = aaReturn
-		fmt.Println("client data")
-		fmt.Println("client data")
-		fmt.Println("client data")
+		clientData = s3_cipher.DecryptMessage(clientHello[5:], serverData.CipherDef.CipherSuite, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+
 		fmt.Println(clientData)
-		// TODO: Frst fix iv for the client, then verify cipher for all messages.
-		serverData.CipherDef.Keys.IVClient = iv
+
+		serverData.CipherDef.Keys.IVClient = clientHello[len(clientHello)-8:]
 
 		if contentType == byte(TLSContentTypeAlert) {
 			// 5 for contenType(1 byte) + version(2bytes) + length (2byte)
 
 			// Lets assume we only parsing one
 			// TODO: write a parser
-			// contentLength := int(recordLength) - (len(clientHello) - 5)
-			// fmt.Printf("\n content length: %d \n", contentLength)
-			// macSent := clientHello[5+contentLength : 5+contentLength+serverData.CipherDef.Spec.HashSize]
-			// dataSent := clientHello[5 : 5+contentLength]
 
 			// streamCipher := serverData.generateStreamCipher([]byte{byte(contentType)}, clientHello[5:7], serverData.ClientSeqNum, serverData.CipherDef.Keys.MacClient)
 
 		}
-		// Make sure its the right place, there can be more than one message decode here
+		clientDataLength := int32(clientData[1])<<16 | int32(clientData[2])<<8 | int32(clientData[3])
+		clientDataWithHeader := 4 + clientDataLength
+
+		dataSent := clientData[:clientDataWithHeader]
+
+		streamCipher := serverData.generateStreamCipher([]byte{byte(contentType)}, dataSent, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacClient)
+
+		if !reflect.DeepEqual(streamCipher, clientData[clientDataWithHeader:]) {
+			// TODO should send alerty
+			fmt.Printf("\n macs are diffrent, expected: %v, got: %v", streamCipher, clientData[clientDataWithHeader:])
+			os.Exit(1)
+		}
+		// TODO find right place for it
 		for i := 7; i >= 0; i-- {
 			serverData.ClientSeqNum[i] += 1
 			if serverData.ClientSeqNum[i] != 0 {
@@ -427,36 +419,16 @@ func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) {
 		}
 
 	}
-	// TODO: don't this this weird condition
-	// we should be able to put it after handlehandshkae when we change logic to recive singular message
 
 	if contentType == byte(TLSContentTypeHandshake) {
 
 		handshakeLength := int32(clientData[1])<<16 | int32(clientData[2])<<8 | int32(clientData[3])
 		serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientData[:handshakeLength+4])
-		msgs := handleHandshake(clientData, serverData, conn)
+		msgs := handleHandshake(clientData, serverData)
 
 		if len(msgs) > 0 {
-			fmt.Println("msgs")
-			fmt.Println(msgs)
-			// fmt.Println(msg[:47])
-			// fmt.Println(msg[47 : 18+47])
-			// fmt.Println(msg[18+47:])
-			// _, err := conn.Write(msg[:47])
-			// if err != nil {
-			// 	fmt.Println("Error reading Client Hello1:", err)
-			// 	os.Exit(1)
-			// }
-			// _, err = conn.Write(msg[47 : 18+47])
-			// if err != nil {
-			// 	fmt.Println("Error reading Client Hello2:", err)
-			// 	os.Exit(1)
-			// }
-			// _, err = conn.Write(msg[18+47:])
-
+			// TODO do write after every message e.g in clientVerify()
 			for _, v := range msgs {
-				fmt.Println("msg")
-				fmt.Println(v)
 				_, err := conn.Write(v)
 				serverData.HandshakeMessages = append(serverData.HandshakeMessages, v[5:])
 				if err != nil {
@@ -480,7 +452,7 @@ func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) {
 		// majorVersion := clientHello[1]
 		// minorVersion := clientHello[2]
 		// length := clientHello[3:4]
-		handleHandshakeChangeCipherSpec(clientData, serverData, conn)
+		handleHandshakeChangeCipherSpec(clientData, serverData)
 	} else {
 		fmt.Println("unknown type!!! type:" + string(contentType))
 	}
@@ -567,12 +539,12 @@ func handleAlert(clientData []byte, conn net.Conn) {
 
 }
 
-func handleHandshake(clientData []byte, serverData *ServerData, conn net.Conn) [][]byte {
+func handleHandshake(clientData []byte, serverData *ServerData) [][]byte {
 
 	handshakeMessageType := TLSHandshakeMessageType(clientData[0])
 
 	if handshakeMessageType == TLSHandshakeMessageClientHello {
-		handleHandshakeClientHello(clientData, serverData, conn)
+		handleHandshakeClientHello(clientData, serverData)
 		serverHelloOutput := serverHello(serverData)
 
 		resp := make([][]byte, 0)
@@ -583,8 +555,6 @@ func handleHandshake(clientData []byte, serverData *ServerData, conn net.Conn) [
 
 		resp = append(resp, serverKeyExchangeOutput)
 
-		// serverData.HandshakeMessages = append(serverData.HandshakeMessages, resp[5:])
-
 		serverHelloDoneOutput := serverHelloDone(serverData)
 
 		resp = append(resp, serverHelloDoneOutput)
@@ -592,10 +562,10 @@ func handleHandshake(clientData []byte, serverData *ServerData, conn net.Conn) [
 		return resp
 	} else if handshakeMessageType == TLSHandshakeMessageClientKeyExchange {
 
-		handleHandshakeClientKeyExchange(clientData, serverData, conn)
+		handleHandshakeClientKeyExchange(clientData, serverData)
 
 	} else if handshakeMessageType == TLSHandshakeMessageFinished {
-		handleHandshakeClientFinished(clientData, serverData, conn)
+		handleHandshakeClientFinished(clientData, serverData)
 
 		resp := make([][]byte, 0)
 
@@ -614,7 +584,7 @@ func handleHandshake(clientData []byte, serverData *ServerData, conn net.Conn) [
 	return [][]byte{}
 }
 
-func handleHandshakeClientHello(clientData []byte, serverData *ServerData, conn net.Conn) {
+func handleHandshakeClientHello(clientData []byte, serverData *ServerData) {
 
 	clientVersion := binary.BigEndian.Uint16(clientData[4:6]) // backward compability, used to dicated which version to use, now there is set in protocol version and newest one is chosen.
 
@@ -735,7 +705,7 @@ func serverHelloDone(serverData *ServerData) []byte {
 	return serverHelloDone
 }
 
-func handleHandshakeClientKeyExchange(clientData []byte, serverData *ServerData, conn net.Conn) {
+func handleHandshakeClientKeyExchange(clientData []byte, serverData *ServerData) {
 	fmt.Println("handleClientyKeyExchange")
 	// handshakeLength := int32(clientHello[6])<<16 | int32(clientHello[7])<<8 | int32(clientHello[8])
 	// TODO
@@ -772,7 +742,6 @@ func handleHandshakeClientKeyExchange(clientData []byte, serverData *ServerData,
 		IVClient:       keyBlock[writeKeyEndIndex : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize],
 		IVServer:       keyBlock[writeKeyEndIndex+serverData.CipherDef.Spec.IvSize : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize*2],
 	}
-
 	serverData.CipherDef.Keys = cipherDefKeys
 	serverData.MasterKey = masterKey
 	serverData.PreMasterSecret = preMasterSecret
@@ -836,7 +805,7 @@ func serverFinished(serverData *ServerData) []byte {
 	return serverFinished
 }
 
-func handleHandshakeClientFinished(clientData []byte, serverData *ServerData, conn net.Conn) [][]byte {
+func handleHandshakeClientFinished(clientData []byte, serverData *ServerData) [][]byte {
 
 	clientBytes := helpers.Int64ToBIgEndian(int64(ClientSender))
 
@@ -865,89 +834,7 @@ func handleHandshakeClientFinished(clientData []byte, serverData *ServerData, co
 
 }
 
-func newww(serverData *ServerData, conn net.Conn) {
-	content := []byte{1, 0}
-
-	streamCipher := serverData.generateStreamCipher([]byte{byte(TLSContentTypeApplicationData)}, content, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
-
-	for i := 7; i >= 0; i-- {
-		serverData.ServerSeqNum[i] += 1
-		if serverData.ServerSeqNum[i] != 0 {
-			break
-		}
-	}
-
-	combinedBytes := []byte{}
-	combinedBytes = append(combinedBytes, content...)
-	combinedBytes = append(combinedBytes, streamCipher...)
-
-	combinedBytesPadded := addCustomPadding(combinedBytes, 24)
-
-	// the problem is that decoded bytes on openssl are diffrent that ones produces here
-	encryptedMsg, err := s3_cipher.Encrypt3DESCBC(serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer, combinedBytesPadded)
-
-	if err != nil {
-		fmt.Println("problem encrypting data")
-		fmt.Println(err)
-	}
-
-	resp := []byte{23, 3, 0, 0, byte(len(combinedBytesPadded))}
-	resp = append(resp, encryptedMsg...)
-	serverData.CipherDef.Keys.IVServer = resp[21:29]
-	// serverData.CipherDef.Keys.IVClient = resp[21:29]
-
-	_, err = conn.Write(resp)
-
-	if err != nil {
-		fmt.Print("Couldn't send change cipher spec message")
-	}
-
-}
-
-// To removed later
-func tmpCloseAlert(serverData *ServerData, conn net.Conn) {
-	content := []byte{1, 0}
-
-	streamCipher := serverData.generateStreamCipher([]byte{byte(TLSContentTypeAlert)}, content, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
-
-	for i := 7; i >= 0; i-- {
-		serverData.ServerSeqNum[i] += 1
-		if serverData.ServerSeqNum[i] != 0 {
-			break
-		}
-	}
-
-	combinedBytes := []byte{}
-	combinedBytes = append(combinedBytes, content...)
-	combinedBytes = append(combinedBytes, streamCipher...)
-
-	combinedBytesPadded := addCustomPadding(combinedBytes, 24)
-	// the problem is that decoded bytes on openssl are diffrent that ones produces here
-	encryptedMsg, err := s3_cipher.Encrypt3DESCBC(serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer, combinedBytesPadded)
-
-	if err != nil {
-		fmt.Println("problem encrypting data")
-		fmt.Println(err)
-	}
-
-	resp := []byte{21, 3, 0, 0, byte(len(combinedBytesPadded))}
-	resp = append(resp, encryptedMsg...)
-
-	fmt.Println("ENCYRYPTED!!!! TMP CLOSE ALERT")
-	fmt.Println(resp)
-	for _, v := range resp {
-		fmt.Printf(" %02X", v)
-	}
-
-	_, err = conn.Write(resp)
-
-	if err != nil {
-		fmt.Print("Couldn't send change cipher spec message")
-	}
-
-}
-
-func handleHandshakeChangeCipherSpec(clientData []byte, serverData *ServerData, conn net.Conn) {
+func handleHandshakeChangeCipherSpec(clientData []byte, serverData *ServerData) {
 
 	message := TLSCipherSpec(clientData[0])
 	if message == TLSCipherSpecDefault {
