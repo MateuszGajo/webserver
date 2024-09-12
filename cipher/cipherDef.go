@@ -40,14 +40,22 @@ const (
 	EncryptionAlgorithmFortezza EncryptionAlgorithm = "FORTEZZA"
 )
 
+type SignatureAlgorithm string
+
+const (
+	SignatureAlgorithmRSA       SignatureAlgorithm = "signatureRSA"
+	SignatureAlgorithmDSA       SignatureAlgorithm = "signatureDSA"
+	SignatureAlgorithmAnonymous SignatureAlgorithm = "signatureAnonymous"
+)
+
 type CipherSpec struct {
-	HashSize                  int
-	KeyMaterial               int
-	IvSize                    int
-	HashAlgorithm             HashAlgorithm
-	KeyExchange               KeyExchangeMethod
-	EncryptionAlgorithm       EncryptionAlgorithm
-	KeyExchangeAuthentication bool
+	HashSize            int
+	KeyMaterial         int
+	IvSize              int
+	HashAlgorithm       HashAlgorithm
+	KeyExchange         KeyExchangeMethod
+	EncryptionAlgorithm EncryptionAlgorithm
+	SignatureAlgorithm  SignatureAlgorithm
 }
 
 type CipherDef struct {

@@ -1,6 +1,7 @@
 package cipher
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math/big"
 	"os"
@@ -10,6 +11,8 @@ func DecryptMessage(encryptedData []byte, cipherSuite uint16, writeKey, iv []byt
 
 	switch TLSCipherSuite(cipherSuite) {
 	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
+		return DecryptDesMessage(encryptedData, writeKey, iv)
+	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
 		return DecryptDesMessage(encryptedData, writeKey, iv)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherSuite)
@@ -24,6 +27,8 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte) []byte {
 
 	switch TLSCipherSuite(cipherDef.CipherSuite) {
 	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
+		return EncryptDesMessage(data, cipherDef.Keys.WriteKeyServer, cipherDef.Keys.IVServer)
+	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
 		return EncryptDesMessage(data, cipherDef.Keys.WriteKeyServer, cipherDef.Keys.IVServer)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
@@ -51,10 +56,6 @@ func (cipherDef *CipherDef) ComputerMasterSecret() *big.Int {
 
 func (cipherDef *CipherDef) GenerateServerKeyExchange() []byte {
 
-	if cipherDef.Spec.KeyExchangeAuthentication {
-		return []byte{}
-	}
-
 	var resp []byte
 
 	switch cipherDef.Spec.KeyExchange {
@@ -71,10 +72,17 @@ func (cipherDef *CipherDef) GenerateServerKeyExchange() []byte {
 	return resp
 }
 
-func (cipherDef *CipherDef) SelectCipherSuite() []byte {
+func (cipherDef *CipherDef) SelectCipherSuite(cipherSuites []byte) []byte {
+
+	cipherList := []uint16{}
+
+	for i := 0; i < len(cipherSuites); i += 2 {
+		cipher := binary.BigEndian.Uint16(cipherSuites[i : i+2])
+		cipherList = append(cipherList, cipher)
+	}
 
 	// TODO implement this
-	cipherDef.CipherSuite = 0x001B
+	cipherDef.CipherSuite = cipherList[0]
 
 	// TODO should also setup this
 	cipherDef.GetCipherSpecInfo()
@@ -120,6 +128,14 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 	case TLS_CIPHER_SUITE_SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA:
 	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SHA:
 	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
+		cipherDef.Spec.HashSize = 20
+		cipherDef.Spec.KeyMaterial = 24
+		cipherDef.Spec.IvSize = 8
+		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
+		// TODO change this to DHE
+		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
+		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA
 	case TLS_CIPHER_SUITE_SSL_DH_anon_EXPORT_WITH_RC4_40_MD5:
 	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_RC4_128_MD5:
 	case TLS_CIPHER_SUITE_SSL_DH_anon_EXPORT_WITH_DES40_CBC_SHA:
@@ -131,7 +147,7 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
 		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
-		cipherDef.Spec.KeyExchangeAuthentication = false
+		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmAnonymous
 	case TLS_CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_NULL_SHA:
 	case TLS_CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA:
 	case TLS_CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_RC4_128_SHA:

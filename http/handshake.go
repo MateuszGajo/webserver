@@ -1,10 +1,14 @@
 package http
 
 import (
+	"crypto"
 	"crypto/md5"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/x509"
 	"encoding/binary"
+	"encoding/pem"
 	"fmt"
 	"hash"
 	"math/big"
@@ -200,6 +204,7 @@ type ServerData struct {
 	CipherDef         s3_cipher.CipherDef
 	ServerSeqNum      []byte
 	ClientSeqNum      []byte
+	rsa               rsa.PrivateKey
 }
 
 var pad1 = []byte{
@@ -384,7 +389,7 @@ func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) {
 
 	if serverData.IsEncrypted {
 		clientData = s3_cipher.DecryptMessage(clientHello[5:], serverData.CipherDef.CipherSuite, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
-
+		fmt.Println("decrypted data")
 		fmt.Println(clientData)
 
 		serverData.CipherDef.Keys.IVClient = clientHello[len(clientHello)-8:]
@@ -428,6 +433,8 @@ func handleMessage(clientHello []byte, conn net.Conn, serverData *ServerData) {
 
 		if len(msgs) > 0 {
 			// TODO do write after every message e.g in clientVerify()
+			fmt.Println("msgs")
+			fmt.Println(msgs)
 			for _, v := range msgs {
 				_, err := conn.Write(v)
 				serverData.HandshakeMessages = append(serverData.HandshakeMessages, v[5:])
@@ -539,6 +546,132 @@ func handleAlert(clientData []byte, conn net.Conn) {
 
 }
 
+func (serverData *ServerData) loadCertificateAndKey(certFile, keyFile, passphrase string) ([]byte, error) {
+	// Read the certificate file
+	fmt.Println("hello enter??")
+	certPEM, err := os.ReadFile(certFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read certificate file: %v", err)
+	}
+
+	// Read the private key file
+	keyPEM, err := os.ReadFile(keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read key file: %v", err)
+	}
+
+	// Decode the private key PEM block
+	keyBlock, _ := pem.Decode(keyPEM)
+	if keyBlock == nil {
+		return nil, fmt.Errorf("failed to decode PEM block containing private key")
+	}
+
+	// If the private key is encrypted, decrypt it using the passphrase
+	var keyDER []byte
+	if x509.IsEncryptedPEMBlock(keyBlock) {
+		keyDER, err = x509.DecryptPEMBlock(keyBlock, []byte(passphrase))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt private key: %v", err)
+		}
+	} else {
+		keyDER = keyBlock.Bytes
+	}
+	// Parse the private key to ensure it's valid
+	privateKey, err := x509.ParsePKCS8PrivateKey(keyDER)
+	if err != nil {
+		privateKey, err = x509.ParsePKCS1PrivateKey(keyDER)
+		if err != nil {
+			privateKey, err = x509.ParseECPrivateKey(keyDER)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse private key: %v", err)
+			}
+		}
+	}
+
+	rsaKey, ok := privateKey.(*rsa.PrivateKey)
+	if ok {
+		serverData.rsa = *rsaKey
+	}
+
+	certBlock, _ := pem.Decode(certPEM)
+	if certBlock == nil {
+		return nil, fmt.Errorf("failed to decode PEM block containing certificate")
+	}
+
+	// Parse the certificate
+	cert, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse certificate: %v", err)
+	}
+
+	// Get the raw DER-encoded bytes of the certificate
+	rawBytes := cert.Raw
+
+	fmt.Println("raw bytes")
+	fmt.Println(rawBytes)
+
+	return rawBytes, nil
+}
+
+func (serverData *ServerData) loadCertificate() []byte {
+	certPath := "server.crt"
+	keyFile := "server.key"
+	pwd, _ := os.Getwd()
+
+	certFileFolder := pwd + "/cert/" + certPath
+	keyFileFolder := pwd + "/cert/" + keyFile
+	passphrase := os.Getenv("CERTIFICATE_PASSPHRASE")
+
+	// Load the certificate and key
+	certBytes, err := serverData.loadCertificateAndKey(certFileFolder, keyFileFolder, passphrase)
+
+	if err != nil {
+		fmt.Println("err")
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(len(certBytes) + 3 + 3)
+	if err != nil {
+		fmt.Print("err while converting to big endina")
+	}
+
+	certLengthByte, err := helpers.IntTo3BytesBigEndian(len(certBytes) + 3)
+	if err != nil {
+		fmt.Print("err while converting to big endina")
+	}
+
+	certLengthByteSingle, err := helpers.IntTo3BytesBigEndian(len(certBytes))
+	if err != nil {
+		fmt.Print("err while converting to big endina")
+	}
+
+	serverCertificate := []byte{}
+
+	serverCertificate = append(serverCertificate, byte(TLSContentTypeHandshake))
+
+	recordLengthByte := helpers.Int32ToBigEndian(len(certBytes) + 4 + 3 + 3)
+
+	serverCertificate = append(serverCertificate, serverData.SSLVersion...)
+	serverCertificate = append(serverCertificate, recordLengthByte...)
+	serverCertificate = append(serverCertificate, byte(TLSHandshakeMessageCertificate))
+	serverCertificate = append(serverCertificate, handshakeLengthByte...)
+	serverCertificate = append(serverCertificate, certLengthByte...)
+	serverCertificate = append(serverCertificate, certLengthByteSingle...)
+	serverCertificate = append(serverCertificate, certBytes...)
+
+	if err != nil {
+		fmt.Println("cant read cerificate")
+		os.Exit(1)
+	}
+
+	fmt.Println("server certificate")
+	fmt.Println(serverCertificate)
+
+	return serverCertificate
+
+}
+
 func handleHandshake(clientData []byte, serverData *ServerData) [][]byte {
 
 	handshakeMessageType := TLSHandshakeMessageType(clientData[0])
@@ -550,10 +683,20 @@ func handleHandshake(clientData []byte, serverData *ServerData) [][]byte {
 		resp := make([][]byte, 0)
 
 		resp = append(resp, serverHelloOutput)
+		// this is optional
+		// server certificate
 
+		serverCertificateOutput := serverData.loadCertificate()
+		if len(serverCertificateOutput) > 0 {
+			resp = append(resp, serverCertificateOutput)
+		}
+
+		// this is optional
 		serverKeyExchangeOutput := serverKeyExchange(serverData)
 
-		resp = append(resp, serverKeyExchangeOutput)
+		if len(serverKeyExchangeOutput) > 0 {
+			resp = append(resp, serverKeyExchangeOutput)
+		}
 
 		serverHelloDoneOutput := serverHelloDone(serverData)
 
@@ -601,10 +744,30 @@ func handleHandshakeClientHello(clientData []byte, serverData *ServerData) {
 	radnomBytesData := clientData[10:38]
 	serverData.ClientRandom = clientData[6:38]
 
+	// sessionId := clientData[38]
+	cipherSuitesLength := binary.BigEndian.Uint16(clientData[39:41])
+
+	cipherSuites := clientData[41 : 41+cipherSuitesLength]
+	compressionsLength := clientData[41+cipherSuitesLength]
+
+	compressionMethodList := clientData[41+cipherSuitesLength+1:]
+
+	if len(compressionMethodList) != int(compressionsLength) {
+		fmt.Printf("\n got length:%v, expected :%v", len(compressionMethodList), int(compressionsLength))
+		os.Exit(1)
+	}
+
 	fmt.Println("Unix time")
 	fmt.Println(time.Unix(int64(radnomBytesTime), 0))
 	fmt.Println("random bytes")
 	fmt.Println(radnomBytesData)
+
+	fmt.Println("ciphers")
+	fmt.Println(cipherSuites)
+	fmt.Println("compression")
+	fmt.Println(compressionMethodList)
+	serverData.CipherDef.SelectCipherSuite(cipherSuites)
+	// compressionMethod := serverData.CipherDef.SelectCompressionMethod()
 
 	if clientData[39] == 255 {
 		//
@@ -614,6 +777,15 @@ func handleHandshakeClientHello(clientData []byte, serverData *ServerData) {
 	} else {
 		// other encryptions
 	}
+}
+
+func signKeyParams(algorithm hash.Hash, clientRandom, serverRandom, serverParams []byte) []byte {
+	algorithm.Reset()
+	algorithm.Write(clientRandom)
+	algorithm.Write(serverRandom)
+	algorithm.Write(serverParams)
+
+	return algorithm.Sum(nil)
 
 }
 
@@ -622,6 +794,34 @@ func serverKeyExchange(serverData *ServerData) []byte {
 	serverKeyExchange := []byte{}
 
 	keyExchangeData := serverData.CipherDef.GenerateServerKeyExchange()
+
+	switch serverData.CipherDef.Spec.SignatureAlgorithm {
+	case s3_cipher.SignatureAlgorithmAnonymous:
+	case s3_cipher.SignatureAlgorithmRSA:
+		md5Hash := signKeyParams(md5.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeData)
+		shaHash := signKeyParams(sha1.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeData)
+
+		keyExchangeDataHash := []byte{}
+		keyExchangeDataHash = append(keyExchangeDataHash, md5Hash...)
+		keyExchangeDataHash = append(keyExchangeDataHash, shaHash...)
+		fmt.Println("key data exchange")
+		keyExchangeData = append(keyExchangeData, []byte{1, 0}...)
+
+		signature, err := rsa.SignPKCS1v15(rand.Reader, &serverData.rsa, crypto.Hash(0), keyExchangeDataHash)
+		keyExchangeData = append(keyExchangeData, signature...)
+
+		if err != nil {
+			fmt.Println("problem ecnrypting data")
+			fmt.Println(err)
+		}
+
+	case s3_cipher.SignatureAlgorithmDSA:
+		fmt.Printf("Algorithm: %v not implemented yet", serverData.CipherDef.Spec.SignatureAlgorithm)
+	default:
+		fmt.Printf("Unsupported Algorithm: %v", serverData.CipherDef.Spec.SignatureAlgorithm)
+		os.Exit(1)
+	}
+
 	// Send key exchange message
 	// TODO: write better logic for it
 	// maybe lets put ino another function for now
@@ -640,6 +840,11 @@ func serverKeyExchange(serverData *ServerData) []byte {
 		serverKeyExchange = append(serverKeyExchange, byte(TLSHandshakeMessageServerKeyExchange))
 		serverKeyExchange = append(serverKeyExchange, handshakeLengthByte...)
 		serverKeyExchange = append(serverKeyExchange, keyExchangeData...)
+
+		fmt.Println("key exchange data")
+		for _, v := range keyExchangeData {
+			fmt.Printf("%d, ", v)
+		}
 
 	}
 
@@ -662,7 +867,7 @@ func serverHello(serverData *ServerData) []byte {
 
 	// pass actually list of cipher suite and compressionMethods and write like basic function to choose algorithm
 
-	cipherSuite := serverData.CipherDef.SelectCipherSuite()
+	cipherSuite := helpers.Int32ToBigEndian(int(serverData.CipherDef.CipherSuite))
 	compressionMethod := serverData.CipherDef.SelectCompressionMethod()
 	protocolVersion := serverData.SSLVersion
 	// TODO make session work, we can focus on it later, first implement another alogrithm
@@ -684,13 +889,15 @@ func serverHello(serverData *ServerData) []byte {
 	serverHello = append(serverHello, byte(TLSHandshakeMessageServerHello))
 	serverHello = append(serverHello, handshakeLengthByte...) // 3 bytes
 	serverHello = append(serverHello, protocolVersion...)
-	serverHello = append(serverHello, unitTimeBytes...)
-	serverHello = append(serverHello, randomBytes...)
+	// serverHello = append(serverHello, unitTimeBytes...)
+	// serverHello = append(serverHello, randomBytes...)
+	// TODO: lets leave it for now as it easier to debug, remove later
+	serverHello = append(serverHello, []byte{102, 221, 107, 191, 80, 40, 191, 66, 96, 85, 167, 65, 108, 253, 149, 220, 154, 111, 218, 246, 151, 219, 148, 153, 252, 180, 122, 211, 0, 0, 0, 0}...)
 	serverHello = append(serverHello, sessionId)
 	serverHello = append(serverHello, cipherSuite...)
 	serverHello = append(serverHello, compressionMethod...)
 
-	serverData.ServerRandom = append(unitTimeBytes, randomBytes...)
+	serverData.ServerRandom = []byte{102, 221, 107, 191, 80, 40, 191, 66, 96, 85, 167, 65, 108, 253, 149, 220, 154, 111, 218, 246, 151, 219, 148, 153, 252, 180, 122, 211, 0, 0, 0, 0}
 
 	return serverHello
 }
