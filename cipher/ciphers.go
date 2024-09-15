@@ -14,6 +14,10 @@ func DecryptMessage(encryptedData []byte, cipherSuite uint16, writeKey, iv []byt
 		return DecryptDesMessage(encryptedData, writeKey, iv)
 	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
 		return DecryptDesMessage(encryptedData, writeKey, iv)
+	case TLS_CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA:
+		return DecryptDesMessage(encryptedData, writeKey, iv)
+	case TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA:
+		return DecryptDesMessage(encryptedData, writeKey, iv)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherSuite)
 		os.Exit(1)
@@ -29,6 +33,10 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte) []byte {
 	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
 		return EncryptDesMessage(data, cipherDef.Keys.WriteKeyServer, cipherDef.Keys.IVServer)
 	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
+		return EncryptDesMessage(data, cipherDef.Keys.WriteKeyServer, cipherDef.Keys.IVServer)
+	case TLS_CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA:
+		return EncryptDesMessage(data, cipherDef.Keys.WriteKeyServer, cipherDef.Keys.IVServer)
+	case TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA:
 		return EncryptDesMessage(data, cipherDef.Keys.WriteKeyServer, cipherDef.Keys.IVServer)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
@@ -62,6 +70,7 @@ func (cipherDef *CipherDef) GenerateServerKeyExchange() []byte {
 	case KeyExchangeMethodDH:
 		resp = cipherDef.DhParams.GenerateDhParams()
 	case KeyExchangeMethodRSA:
+		return []byte{}
 	case KeyExchangeMethodDHE:
 		return []byte{}
 	default:
@@ -116,6 +125,15 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 	case TLS_CIPHER_SUITE_SSL_RSA_EXPORT_WITH_DES40_CBC_SHA:
 	case TLS_CIPHER_SUITE_SSL_RSA_WITH_DES_CBC_SHA:
 	case TLS_CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA:
+		cipherDef.Spec.HashSize = 20
+		cipherDef.Spec.KeyMaterial = 24
+		cipherDef.Spec.IvSize = 8
+		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
+		// TODO change this to DHE
+		// TODO roate his when using DHE
+		cipherDef.Spec.KeyExchange = KeyExchangeMethodRSA
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
+		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA
 	case TLS_CIPHER_SUITE_SSL_DH_DSS_EXPORT_WITH_DES40_CBC_SHA:
 	case TLS_CIPHER_SUITE_SSL_DH_DSS_WITH_DES_CBC_SHA:
 	case TLS_CIPHER_SUITE_SSL_DH_DSS_WITH_3DES_EDE_CBC_SHA:
@@ -125,6 +143,15 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 	case TLS_CIPHER_SUITE_SSL_DHE_DSS_EXPORT_WITH_DES40_CBC_SHA:
 	case TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_DES_CBC_SHA:
 	case TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA:
+		cipherDef.Spec.HashSize = 20
+		cipherDef.Spec.KeyMaterial = 24
+		cipherDef.Spec.IvSize = 8
+		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
+		// TODO change this to DHE
+		// TODO roate his when using DHE
+		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
+		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmDSA
 	case TLS_CIPHER_SUITE_SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA:
 	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SHA:
 	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
@@ -133,6 +160,7 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		cipherDef.Spec.IvSize = 8
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
 		// TODO change this to DHE
+		// TODO roate his when using DHE
 		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
 		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA

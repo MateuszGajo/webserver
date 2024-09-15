@@ -44,7 +44,7 @@ type SignatureAlgorithm string
 
 const (
 	SignatureAlgorithmRSA       SignatureAlgorithm = "signatureRSA"
-	SignatureAlgorithmDSA       SignatureAlgorithm = "signatureDSA"
+	SignatureAlgorithmDSA       SignatureAlgorithm = "signatureDSA" // DSS is standard developved by nist, DSA is algorithm defines within for creating and veryfin digital signatures
 	SignatureAlgorithmAnonymous SignatureAlgorithm = "signatureAnonymous"
 )
 

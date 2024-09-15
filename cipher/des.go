@@ -73,6 +73,8 @@ func removeCustomPadding(src []byte, blockSize int) ([]byte, error) {
 
 func DecryptDesMessage(encryptedData, writeKey, iv []byte) []byte {
 	encryptedMessage := encryptedData
+	fmt.Println("decrypted data?")
+	fmt.Println(encryptedData)
 
 	decodedMsg, err := Decrypt3DESCBC(writeKey, iv, encryptedMessage)
 	if err != nil {
@@ -80,6 +82,10 @@ func DecryptDesMessage(encryptedData, writeKey, iv []byte) []byte {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+
+	fmt.Println("decoded msg")
+	fmt.Println(decodedMsg)
+	fmt.Println(len(decodedMsg))
 
 	decodedMsgWithoutPadding, err := removeCustomPadding(decodedMsg, len(encryptedData))
 	if err != nil {

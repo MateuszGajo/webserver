@@ -2,13 +2,16 @@ package http
 
 import (
 	"crypto"
+	"crypto/dsa"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/binary"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"hash"
 	"math/big"
@@ -195,7 +198,7 @@ const (
 
 type ServerData struct {
 	IsEncrypted       bool
-	PreMasterSecret   *big.Int
+	PreMasterSecret   []byte
 	ClientRandom      []byte
 	ServerRandom      []byte
 	SSLVersion        []byte
@@ -205,6 +208,7 @@ type ServerData struct {
 	ServerSeqNum      []byte
 	ClientSeqNum      []byte
 	rsa               rsa.PrivateKey
+	dsa               dsa.PrivateKey
 }
 
 var pad1 = []byte{
@@ -546,6 +550,40 @@ func handleAlert(clientData []byte, conn net.Conn) {
 
 }
 
+func ParseDSAPrivateKey(der []byte) (*dsa.PrivateKey, error) {
+	var k struct {
+		Version int
+		P       *big.Int
+		Q       *big.Int
+		G       *big.Int
+		Pub     *big.Int
+		Priv    *big.Int
+	}
+	rest, err := asn1.Unmarshal(der, &k)
+	fmt.Println("lets display k")
+	fmt.Printf("/n %+v", k)
+	fmt.Println("bytes")
+	fmt.Println(k.Priv.Bytes())
+	if err != nil {
+		return nil, errors.New("ssh: failed to parse DSA key: " + err.Error())
+	}
+	if len(rest) > 0 {
+		return nil, errors.New("ssh: garbage after DSA key")
+	}
+
+	return &dsa.PrivateKey{
+		PublicKey: dsa.PublicKey{
+			Parameters: dsa.Parameters{
+				P: k.P,
+				Q: k.Q,
+				G: k.G,
+			},
+			Y: k.Pub,
+		},
+		X: k.Priv,
+	}, nil
+}
+
 func (serverData *ServerData) loadCertificateAndKey(certFile, keyFile, passphrase string) ([]byte, error) {
 	// Read the certificate file
 	fmt.Println("hello enter??")
@@ -561,37 +599,64 @@ func (serverData *ServerData) loadCertificateAndKey(certFile, keyFile, passphras
 	}
 
 	// Decode the private key PEM block
+	// keyBlockBytes := keyPEM
 	keyBlock, _ := pem.Decode(keyPEM)
 	if keyBlock == nil {
 		return nil, fmt.Errorf("failed to decode PEM block containing private key")
 	}
+	keyBlockBytes := keyBlock.Bytes
 
+	// fmt.Println("private key")
+
+	// x509.Parse
 	// If the private key is encrypted, decrypt it using the passphrase
-	var keyDER []byte
-	if x509.IsEncryptedPEMBlock(keyBlock) {
-		keyDER, err = x509.DecryptPEMBlock(keyBlock, []byte(passphrase))
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt private key: %v", err)
-		}
-	} else {
-		keyDER = keyBlock.Bytes
-	}
-	// Parse the private key to ensure it's valid
-	privateKey, err := x509.ParsePKCS8PrivateKey(keyDER)
-	if err != nil {
-		privateKey, err = x509.ParsePKCS1PrivateKey(keyDER)
-		if err != nil {
-			privateKey, err = x509.ParseECPrivateKey(keyDER)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse private key: %v", err)
-			}
-		}
-	}
+	// var keyDER []byte
+	// if x509.IsEncryptedPEMBlock(keyBlock) {
+	// 	fmt.Println("unencrypt?")
+	// 	keyDER, err = x509.DecryptPEMBlock(keyBlock, []byte(passphrase))
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("failed to decrypt private key: %v", err)
+	// 	}
+	// } else {
+	// 	fmt.Println("no~~~!!!unencrypt?")
+	// 	keyDER = keyBlock.Bytes
+	// }
 
-	rsaKey, ok := privateKey.(*rsa.PrivateKey)
-	if ok {
-		serverData.rsa = *rsaKey
+	fmt.Println("dsa key")
+	dsaPrivate, err := ParseDSAPrivateKey(keyBlockBytes)
+
+	if err != nil {
+		fmt.Println("cant parse dsa")
+		fmt.Println(err)
+	} else {
+		fmt.Println("our dsa key")
+		fmt.Printf("\n %+v", dsaPrivate)
+		fmt.Println("end")
+		fmt.Println("end")
+		fmt.Println("end")
+		serverData.dsa = *dsaPrivate
 	}
+	fmt.Println(dsaPrivate)
+	// Parse the private key to ensure it's valid
+	// privateKey, err := x509.ParsePKCS8PrivateKey(keyBlockBytes)
+	// if err != nil {
+	// 	fmt.Println("helo1")
+	// 	fmt.Println(err)
+	// 	privateKey, err = x509.ParsePKCS1PrivateKey(keyBlockBytes)
+	// 	if err != nil {
+	// 		fmt.Println("helo2")
+	// 		fmt.Println(err)
+	// 		privateKey, err = x509.ParseECPrivateKey(keyBlockBytes)
+	// 		if err != nil {
+	// 			return nil, fmt.Errorf("failed to parse private key: %v", err)
+	// 		}
+	// 	}
+	// }
+
+	// rsaKey, ok := privateKey.(*rsa.PrivateKey)
+	// if ok {
+	// 	serverData.rsa = *rsaKey
+	// }
 
 	certBlock, _ := pem.Decode(certPEM)
 	if certBlock == nil {
@@ -614,12 +679,14 @@ func (serverData *ServerData) loadCertificateAndKey(certFile, keyFile, passphras
 }
 
 func (serverData *ServerData) loadCertificate() []byte {
-	certPath := "server.crt"
-	keyFile := "server.key"
+	certPath := "dsa_cert.pem"
+	keyFile := "dsa_private_key_dsa.pem"
 	pwd, _ := os.Getwd()
+	// certFileFolder := pwd + "/cert/rsa/" + certPath
+	// keyFileFolder := pwd + "/cert/rsa/" + keyFile
 
-	certFileFolder := pwd + "/cert/" + certPath
-	keyFileFolder := pwd + "/cert/" + keyFile
+	certFileFolder := pwd + "/cert/dsa/" + certPath
+	keyFileFolder := pwd + "/cert/dsa/" + keyFile
 	passphrase := os.Getenv("CERTIFICATE_PASSPHRASE")
 
 	// Load the certificate and key
@@ -683,11 +750,9 @@ func handleHandshake(clientData []byte, serverData *ServerData) [][]byte {
 		resp := make([][]byte, 0)
 
 		resp = append(resp, serverHelloOutput)
-		// this is optional
-		// server certificate
+		if serverData.CipherDef.Spec.SignatureAlgorithm != s3_cipher.SignatureAlgorithmAnonymous {
+			serverCertificateOutput := serverData.loadCertificate()
 
-		serverCertificateOutput := serverData.loadCertificate()
-		if len(serverCertificateOutput) > 0 {
 			resp = append(resp, serverCertificateOutput)
 		}
 
@@ -789,9 +854,24 @@ func signKeyParams(algorithm hash.Hash, clientRandom, serverRandom, serverParams
 
 }
 
+type DSA_SIG struct {
+	R *big.Int
+	S *big.Int
+}
+
+func i2d_DSA_SIG(sig *DSA_SIG) ([]byte, error) {
+	// The DSA signature (r, s) will be encoded as an ASN.1 sequence
+	return asn1.Marshal(*sig)
+}
+
 func serverKeyExchange(serverData *ServerData) []byte {
 
 	serverKeyExchange := []byte{}
+	// Server key exchange it only used when there is no certificate, has certificate only used for signing (dss, signing-only rsa) or fortezza key exchange
+
+	if serverData.CipherDef.Spec.SignatureAlgorithm != s3_cipher.SignatureAlgorithmAnonymous && (serverData.CipherDef.Spec.KeyExchange != s3_cipher.KeyExchangeMethodDH && serverData.CipherDef.Spec.KeyExchange != s3_cipher.KeyExchangeMethodDHE) {
+		return []byte{}
+	}
 
 	keyExchangeData := serverData.CipherDef.GenerateServerKeyExchange()
 
@@ -816,6 +896,63 @@ func serverKeyExchange(serverData *ServerData) []byte {
 		}
 
 	case s3_cipher.SignatureAlgorithmDSA:
+		fmt.Println("Start")
+		fmt.Println("key exhcnage data")
+		fmt.Println(keyExchangeData)
+		fmt.Println("client random")
+		fmt.Println(serverData.ClientRandom)
+		fmt.Println("server random")
+		fmt.Println(serverData.ServerRandom)
+		shaHash := signKeyParams(sha1.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeData)
+		keyExchangeDataHash := []byte{}
+		keyExchangeDataHash = append(keyExchangeDataHash, shaHash...)
+		fmt.Println("Start2")
+		fmt.Println("key data exchange")
+		fmt.Println(keyExchangeDataHash)
+		r, s, err := dsa.Sign(rand.Reader, &serverData.dsa, keyExchangeDataHash)
+		// TODO check if rsa signin is actualy saving it in asn format
+		signnn, err := i2d_DSA_SIG(&DSA_SIG{R: r, S: s})
+		if err != nil {
+			fmt.Println("error occured while doing some anc1")
+		}
+
+		println("anc1")
+		println("anc1")
+		println("anc1")
+		println(signnn)
+		fmt.Printf("DER Encoded DSA Signature (hex): %x\n", signnn)
+		fmt.Printf("DER Encoded DSA Signature (hex): %v\n", signnn)
+		// r,s [127 250 139 251 115 34 239 130 146 201 66 180 79 92 38 197 41 74 163 232 111 173 130 55 22 115 20 92]
+		// [86 30 7 21 215 203 36 89 52 129 133 92 91 104 202 175 111 117 25 67 94 67 9 110 225 99 145 140]
+		fmt.Println("private key")
+		fmt.Println("private key")
+		fmt.Println(serverData.dsa.X.Bytes())
+		for _, v := range serverData.dsa.X.Bytes() {
+			fmt.Printf(" %02X", v)
+		}
+		fmt.Println("")
+		fmt.Println(serverData.dsa.X)
+		fmt.Println("read!!")
+		if err != nil {
+			fmt.Println("cant sign dsa")
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		fmt.Println("read")
+		fmt.Println(r.Bytes())
+		fmt.Println(s.Bytes())
+		lengthhh := len(signnn)
+		fmt.Println("lengthhh")
+		fmt.Println(lengthhh)
+		keyExchangeData = append(keyExchangeData, []byte{0, byte(lengthhh)}...)
+		keyExchangeData = append(keyExchangeData, signnn...)
+		// keyExchangeData = append(keyExchangeData, s.Bytes()...)
+		// keyExchangeData = append(keyExchangeData, 2)
+		fmt.Println(r.Bytes())
+		fmt.Println(s.Bytes())
+		// keyExchangeData = append(keyExchangeData, []byte{0, 62, 48, 60, 2, 28, 106, 79, 17, 222, 67, 29, 109, 208, 221, 145, 136, 88, 13, 223, 111, 224, 103, 128, 144, 224, 78, 116, 51, 167, 191, 93, 220, 182, 2, 28, 90, 245, 240, 242, 11, 243, 104, 209, 109, 166, 81, 71, 198, 36, 85, 58, 176, 159, 200, 48, 157, 66, 55, 170, 61, 35, 22, 47}...)
+		// 12, 0, 0, 74, 0, 1, 3, 0, 1, 2, 0, 1, 2, 0, 63, 48, 61, 2, 28, 61, 252, 204, 249, 33, 42, 226, 220, 248, 116, 6, 179, 152, 83, 253, 255, 78, 223, 234, 236, 169, 6, 245, 176, 203, 98, 120, 113, 2, 29, 0, 152, 187, 66, 93, 72, 156, 80, 5, 124, 138, 243, 100, 222, 72, 139, 54, 67, 114, 160, 10, 69, 225, 166, 119, 118, 76, 105, 57,
+
 		fmt.Printf("Algorithm: %v not implemented yet", serverData.CipherDef.Spec.SignatureAlgorithm)
 	default:
 		fmt.Printf("Unsupported Algorithm: %v", serverData.CipherDef.Spec.SignatureAlgorithm)
@@ -917,14 +1054,40 @@ func handleHandshakeClientKeyExchange(clientData []byte, serverData *ServerData)
 	// handshakeLength := int32(clientHello[6])<<16 | int32(clientHello[7])<<8 | int32(clientHello[8])
 	// TODO
 	// change cipher spec is zeroing sequence number
-	clientPublicKeyLength := binary.BigEndian.Uint16(clientData[4:6])
-	clientPublicKey := clientData[6 : 6+clientPublicKeyLength]
+	// TODO implement for working with rsa,
 
-	clinetPublicKeyInt := new(big.Int).SetBytes(clientPublicKey)
-	serverData.CipherDef.DhParams.ClientPublic = clinetPublicKeyInt
+	preMasterSecret := []byte{}
+	// TODO: should be moved to cipher
+	if serverData.CipherDef.Spec.KeyExchange == s3_cipher.KeyExchangeMethodDH { // This should only be used with dh key exchange
 
-	preMasterSecret := serverData.CipherDef.ComputerMasterSecret()
+		clientPublicKeyLength := binary.BigEndian.Uint16(clientData[4:6])
+		clientPublicKey := clientData[6 : 6+clientPublicKeyLength]
 
+		clinetPublicKeyInt := new(big.Int).SetBytes(clientPublicKey)
+		serverData.CipherDef.DhParams.ClientPublic = clinetPublicKeyInt
+
+		preMasterSecret = serverData.CipherDef.ComputerMasterSecret().Bytes()
+
+	} else if serverData.CipherDef.Spec.KeyExchange == s3_cipher.KeyExchangeMethodRSA {
+		fmt.Println("client data")
+		fmt.Println(clientData)
+		fmt.Println(clientData[4:260])
+		// rsa.SignPKCS1v15
+		decrypted, err := rsa.DecryptPKCS1v15(rand.Reader, &serverData.rsa, clientData[4:260])
+		if err != nil {
+			fmt.Println("couldnt decrypt rsa")
+		}
+
+		fmt.Println("decrypted")
+		fmt.Println(decrypted)
+		fmt.Println(len(decrypted))
+		fmt.Println("pre master secret")
+
+		// sslVersion := decrypted[0:2]
+		preMasterSecret = decrypted[0:48]
+		fmt.Println(preMasterSecret)
+
+	}
 	masterKeySeed := []byte{}
 	masterKeySeed = append(masterKeySeed, serverData.ClientRandom...)
 	masterKeySeed = append(masterKeySeed, serverData.ServerRandom...)
@@ -933,14 +1096,13 @@ func handleHandshakeClientKeyExchange(clientData []byte, serverData *ServerData)
 	keyBlockSeed = append(keyBlockSeed, serverData.ServerRandom...)
 	keyBlockSeed = append(keyBlockSeed, serverData.ClientRandom...)
 
+	masterKey := ssl_prf(preMasterSecret, masterKeySeed, MASTER_SECRET_LENGTH)
 	keyBlockLen := serverData.CipherDef.Spec.HashSize*2 + serverData.CipherDef.Spec.KeyMaterial*2 + serverData.CipherDef.Spec.IvSize*2
-
-	masterKey := ssl_prf(preMasterSecret.Bytes(), masterKeySeed, MASTER_SECRET_LENGTH)
 	keyBlock := ssl_prf(masterKey, keyBlockSeed, keyBlockLen)
 
 	macEndIndex := serverData.CipherDef.Spec.HashSize * 2
 	writeKeyEndIndex := macEndIndex + serverData.CipherDef.Spec.KeyMaterial*2
-
+	fmt.Println("before")
 	cipherDefKeys := s3_cipher.CipherKeys{
 		MacClient:      keyBlock[:serverData.CipherDef.Spec.HashSize],
 		MacServer:      keyBlock[serverData.CipherDef.Spec.HashSize:macEndIndex],
@@ -949,6 +1111,8 @@ func handleHandshakeClientKeyExchange(clientData []byte, serverData *ServerData)
 		IVClient:       keyBlock[writeKeyEndIndex : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize],
 		IVServer:       keyBlock[writeKeyEndIndex+serverData.CipherDef.Spec.IvSize : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize*2],
 	}
+	fmt.Println("after")
+	fmt.Printf("\n %+v", cipherDefKeys)
 	serverData.CipherDef.Keys = cipherDefKeys
 	serverData.MasterKey = masterKey
 	serverData.PreMasterSecret = preMasterSecret
