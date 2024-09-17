@@ -1,6 +1,10 @@
 package cipher
 
-import "math/big"
+import (
+	"crypto/dsa"
+	"crypto/rsa"
+	"math/big"
+)
 
 type TLSCipherSuite uint16
 
@@ -64,6 +68,16 @@ type CipherDef struct {
 	CipherSuite       uint16
 	CompressionMethod byte
 	DhParams          DhParams
+	rsa               RsaCipher
+	dsa               DsaCipher
+}
+
+type RsaCipher struct {
+	privateKey rsa.PrivateKey
+}
+
+type DsaCipher struct {
+	privateKey dsa.PrivateKey
 }
 
 type DhParams struct {
