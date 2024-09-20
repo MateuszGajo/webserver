@@ -16,7 +16,8 @@ import (
 	"os"
 )
 
-func DecryptMessage(encryptedData []byte, cipherSuite uint16, writeKey, iv []byte) []byte {
+func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, cipherSuite uint16, writeKey, iv []byte) []byte {
+	cipherDef.Keys.IVClient = encryptedData[len(encryptedData)-8:]
 
 	switch TLSCipherSuite(cipherSuite) {
 	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
