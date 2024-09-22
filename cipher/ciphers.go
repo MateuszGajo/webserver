@@ -5,21 +5,18 @@ import (
 	"crypto/dsa"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/x509"
 	"encoding/asn1"
 	"encoding/binary"
-	"encoding/pem"
-	"errors"
 	"fmt"
 	"hash"
 	"math/big"
 	"os"
 )
 
-func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, cipherSuite uint16, writeKey, iv []byte) []byte {
+func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []byte) []byte {
 	cipherDef.Keys.IVClient = encryptedData[len(encryptedData)-8:]
 
-	switch TLSCipherSuite(cipherSuite) {
+	switch TLSCipherSuite(cipherDef.CipherSuite) {
 	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
 		return DecryptDesMessage(encryptedData, writeKey, iv)
 	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
@@ -29,7 +26,7 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, cipherSuite uin
 	case TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA:
 		return DecryptDesMessage(encryptedData, writeKey, iv)
 	default:
-		fmt.Printf("unkonw cipher suite: %v", cipherSuite)
+		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
 		os.Exit(1)
 
 	}
@@ -69,7 +66,7 @@ func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) []byte {
 		cipherDef.DhParams.ClientPublic = clinetPublicKeyInt
 		preMasterSecret = cipherDef.DhParams.ComputePreMasterSecret().Bytes()
 	case KeyExchangeMethodRSA:
-		decrypted, err := rsa.DecryptPKCS1v15(rand.Reader, &cipherDef.rsa.privateKey, data)
+		decrypted, err := rsa.DecryptPKCS1v15(rand.Reader, &cipherDef.Rsa.PrivateKey, data)
 		if err != nil {
 			fmt.Println("couldnt decrypt rsa")
 			os.Exit(1)
@@ -83,108 +80,6 @@ func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) []byte {
 
 	return preMasterSecret
 
-}
-
-func ParseDSAPrivateKey(der []byte) (*dsa.PrivateKey, error) {
-	var k struct {
-		Version int
-		P       *big.Int
-		Q       *big.Int
-		G       *big.Int
-		Pub     *big.Int
-		Priv    *big.Int
-	}
-	rest, err := asn1.Unmarshal(der, &k)
-	fmt.Println("lets display k")
-	fmt.Printf("/n %+v", k)
-	fmt.Println("bytes")
-	fmt.Println(k.Priv.Bytes())
-	if err != nil {
-		return nil, errors.New("ssh: failed to parse DSA key: " + err.Error())
-	}
-	if len(rest) > 0 {
-		return nil, errors.New("ssh: garbage after DSA key")
-	}
-
-	return &dsa.PrivateKey{
-		PublicKey: dsa.PublicKey{
-			Parameters: dsa.Parameters{
-				P: k.P,
-				Q: k.Q,
-				G: k.G,
-			},
-			Y: k.Pub,
-		},
-		X: k.Priv,
-	}, nil
-}
-
-func (cipherDef *CipherDef) ParseCertificate(certFile, keyFile string) ([]byte, error) {
-	// Read the certificate file
-	fmt.Println("hello enter??")
-	certPEM, err := os.ReadFile(certFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read certificate file: %v", err)
-	}
-
-	// Read the private key file
-	keyPEM, err := os.ReadFile(keyFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read key file: %v", err)
-	}
-	// Decode the private key PEM block
-	// keyBlockBytes := keyPEM
-	keyBlock, _ := pem.Decode(keyPEM)
-	if keyBlock == nil {
-		return nil, fmt.Errorf("failed to decode PEM block containing private key")
-	}
-	keyBlockBytes := keyBlock.Bytes
-
-	if cipherDef.Spec.SignatureAlgorithm == SignatureAlgorithmDSA {
-		fmt.Println("dsa key")
-		dsaPrivate, err := ParseDSAPrivateKey(keyBlockBytes)
-
-		if err != nil {
-		} else {
-			cipherDef.dsa.privateKey = *dsaPrivate
-		}
-	} else if cipherDef.Spec.SignatureAlgorithm == SignatureAlgorithmRSA {
-
-		// TODO do better parsing
-		privateKey, err := x509.ParsePKCS8PrivateKey(keyBlockBytes)
-		if err != nil {
-			fmt.Println("helo1")
-			fmt.Println(err)
-			privateKey, err = x509.ParsePKCS1PrivateKey(keyBlockBytes)
-			if err != nil {
-				fmt.Println("helo2")
-				fmt.Println(err)
-				privateKey, err = x509.ParseECPrivateKey(keyBlockBytes)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse private key: %v", err)
-				}
-			}
-		}
-
-		rsaKey, ok := privateKey.(*rsa.PrivateKey)
-		if ok {
-			cipherDef.rsa.privateKey = *rsaKey
-		}
-	}
-
-	certBlock, _ := pem.Decode(certPEM)
-	if certBlock == nil {
-		return nil, fmt.Errorf("failed to decode PEM block containing certificate")
-	}
-
-	// Parse the certificate
-	cert, err := x509.ParseCertificate(certBlock.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse certificate: %v", err)
-	}
-
-	rawBytes := cert.Raw
-	return rawBytes, nil
 }
 
 func signKeyParams(algorithm hash.Hash, clientRandom, serverRandom, serverParams []byte) []byte {
@@ -235,7 +130,7 @@ func (cipherDef *CipherDef) SignParams(hash []byte) []byte {
 		fmt.Println("key data exchange")
 		resp = append(resp, []byte{1, 0}...)
 
-		signature, err := rsa.SignPKCS1v15(rand.Reader, &cipherDef.rsa.privateKey, crypto.Hash(0), hash)
+		signature, err := rsa.SignPKCS1v15(rand.Reader, &cipherDef.Rsa.PrivateKey, crypto.Hash(0), hash)
 		resp = append(resp, signature...)
 
 		if err != nil {
@@ -245,7 +140,7 @@ func (cipherDef *CipherDef) SignParams(hash []byte) []byte {
 
 	case SignatureAlgorithmDSA:
 
-		r, s, err := dsa.Sign(rand.Reader, &cipherDef.dsa.privateKey, hash)
+		r, s, err := dsa.Sign(rand.Reader, &cipherDef.Dsa.PrivateKey, hash)
 		// TODO check if rsa signin is actualy saving it in asn format
 		signnn, err := i2d_DSA_SIG(&DSA_SIG{R: r, S: s})
 		if err != nil {

@@ -1,30 +1,34 @@
 package main
 
 import (
+	"flag"
 	"fmt"
-	"math/big"
-	"net"
+	"os"
+	"webserver/global"
 	"webserver/http"
 )
 
-type ServerData struct {
-	isEncrypted      bool
-	p                *big.Int
-	q                *big.Int
-	private          *big.Int
-	public           *big.Int
-	shared           *big.Int
-	clientRandom     []byte
-	serverRandom     []byte
-	allMessagesShort [][]byte
-	masterKey        []byte
-	macClient        []byte
-	macServer        []byte
-	writeKeyClient   []byte
-	writeKeyServer   []byte
-	IVClient         []byte
-	IVServer         []byte
-	seqNum           int
+func loadParams() *global.Params {
+	cert := flag.String("cert", "", "Server certificate")
+	key := flag.String("key", "", "Cert private key")
+	flag.Parse()
+
+	fmt.Println(key)
+
+	if *cert == "" || *key == "" {
+		return nil
+	}
+	pwd, err := os.Getwd()
+
+	if err != nil {
+		fmt.Println("Cannot get root path, err:%v", err)
+		os.Exit(1)
+	}
+
+	return &global.Params{
+		CertPath: pwd + *cert,
+		KeyPath:  pwd + *key,
+	}
 }
 
 func main() {
@@ -32,26 +36,10 @@ func main() {
 
 	// server := server.CreateServer()
 	// server.RunServer()
+	params := loadParams()
 
-	listener, err := net.Listen("tcp", "127.0.0.1:4221")
+	fmt.Println(params)
 
-	if err != nil {
-		fmt.Println("errr has occured trying while trying to connect")
-		fmt.Println(err)
-	}
-
-	conn, err := listener.Accept()
-
-	if err != nil {
-		fmt.Println("errr has occured trying while trying to connect")
-		fmt.Println(err)
-	}
-
-	if err != nil {
-		fmt.Println("errr has occured trying while accepting connection")
-		fmt.Println(err)
-	}
-
-	http.HandleConnection(conn)
+	http.StartHttpServer(params)
 
 }

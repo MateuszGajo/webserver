@@ -68,16 +68,16 @@ type CipherDef struct {
 	CipherSuite       uint16
 	CompressionMethod byte
 	DhParams          DhParams
-	rsa               RsaCipher
-	dsa               DsaCipher
+	Rsa               RsaCipher
+	Dsa               DsaCipher
 }
 
 type RsaCipher struct {
-	privateKey rsa.PrivateKey
+	PrivateKey rsa.PrivateKey
 }
 
 type DsaCipher struct {
-	privateKey dsa.PrivateKey
+	PrivateKey dsa.PrivateKey
 }
 
 type DhParams struct {

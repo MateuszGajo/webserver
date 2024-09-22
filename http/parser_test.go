@@ -69,3 +69,8 @@ func TestParseMultipleMsg(t *testing.T) {
 		t.Errorf("output should have fullMsg content at index 0. Expected: %v insted we got: %v", fullMsgTwo, output[0])
 	}
 }
+
+// TODO this condition was skipped
+// if len(clientHello) < 5+int(length) {
+// 	return output, clientHello, err
+// }

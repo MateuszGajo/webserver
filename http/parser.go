@@ -36,7 +36,7 @@ func Parser(clientHello []byte) (output [][]byte, rest []byte, err error) {
 		length := binary.BigEndian.Uint16(clientHello[3:5])
 
 		if len(clientHello) < 5+int(length) {
-			return output, rest, err
+			return output, clientHello, err
 		}
 
 		output = append(output, clientHello[:5+length])

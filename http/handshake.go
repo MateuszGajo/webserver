@@ -1,19 +1,25 @@
 package http
 
 import (
+	"crypto/dsa"
 	"crypto/md5"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/x509"
+	"encoding/asn1"
 	"encoding/binary"
+	"encoding/pem"
 	"errors"
-	"flag"
 	"fmt"
 	"hash"
+	"math/big"
 	"net"
 	"os"
 	"reflect"
 	"time"
 	s3_cipher "webserver/cipher"
+	"webserver/global"
 	"webserver/helpers"
 )
 
@@ -190,21 +196,6 @@ const (
 	serverSender Sender = 0x53525652
 )
 
-type ServerData struct {
-	IsEncrypted       bool
-	PreMasterSecret   []byte
-	ClientRandom      []byte
-	ServerRandom      []byte
-	SSLVersion        []byte
-	HandshakeMessages [][]byte
-	MasterKey         []byte
-	CipherDef         s3_cipher.CipherDef
-	ServerSeqNum      []byte
-	ClientSeqNum      []byte
-	conn              net.Conn
-	wBuff             []byte
-}
-
 var pad1 = []byte{
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
@@ -226,10 +217,185 @@ var pad2 = []byte{
 
 // AES advanced encryptio0n standard, block cipher, symmetric key, aes is faster
 
-func HandleConnection(conn net.Conn) {
+type ServerData struct {
+	IsEncrypted       bool
+	PreMasterSecret   []byte
+	ClientRandom      []byte
+	ServerRandom      []byte
+	SSLVersion        []byte
+	HandshakeMessages [][]byte
+	MasterKey         []byte
+	CipherDef         s3_cipher.CipherDef
+	ServerSeqNum      []byte
+	ClientSeqNum      []byte
+	conn              net.Conn
+	wBuff             []byte
+	cert              []byte
+}
+
+func (serverData *ServerData) loadCert(certPath, keyPath string) error {
+
+	certBytes, err := serverData.ParseCertificate(certPath, keyPath)
+
+	if err != nil {
+		return errors.New("problem passing certificate")
+	}
+
+	serverData.cert = certBytes
+
+	return nil
+
+}
+
+func ParseDSAPrivateKey(der []byte) (*dsa.PrivateKey, error) {
+	var k struct {
+		Version int
+		P       *big.Int
+		Q       *big.Int
+		G       *big.Int
+		Pub     *big.Int
+		Priv    *big.Int
+	}
+	rest, err := asn1.Unmarshal(der, &k)
+	fmt.Println("lets display k")
+	fmt.Printf("/n %+v", k)
+	fmt.Println("bytes")
+	fmt.Println(k.Priv.Bytes())
+	if err != nil {
+		return nil, errors.New("ssh: failed to parse DSA key: " + err.Error())
+	}
+	if len(rest) > 0 {
+		return nil, errors.New("ssh: garbage after DSA key")
+	}
+
+	return &dsa.PrivateKey{
+		PublicKey: dsa.PublicKey{
+			Parameters: dsa.Parameters{
+				P: k.P,
+				Q: k.Q,
+				G: k.G,
+			},
+			Y: k.Pub,
+		},
+		X: k.Priv,
+	}, nil
+}
+
+func (serverData *ServerData) ParseCertificate(certFile, keyFile string) ([]byte, error) {
+	// Read the certificate file
+	fmt.Println("hello enter??")
+	certPEM, err := os.ReadFile(certFile)
+	if err != nil {
+		fmt.Println("err")
+		fmt.Println(err)
+		return nil, fmt.Errorf("failed to read certificate file: %v", err)
+	}
+	fmt.Println("cert")
+	fmt.Println(certPEM)
+
+	// Read the private key file
+	keyPEM, err := os.ReadFile(keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read key file: %v", err)
+	}
+	fmt.Println("key")
+	// Decode the private key PEM block
+	// keyBlockBytes := keyPEM
+	keyBlock, _ := pem.Decode(keyPEM)
+	if keyBlock == nil {
+		return nil, fmt.Errorf("failed to decode PEM block containing private key")
+	}
+	fmt.Println("key1")
+	keyBlockBytes := keyBlock.Bytes
+
+	certBlock, _ := pem.Decode(certPEM)
+	if certBlock == nil {
+		return nil, fmt.Errorf("failed to decode PEM block containing certificate")
+	}
+
+	// Parse the certificate
+	cert, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse certificate: %v", err)
+	}
+
+	if cert.PublicKeyAlgorithm == x509.DSA {
+		fmt.Println("dsa key")
+		dsaPrivate, err := ParseDSAPrivateKey(keyBlockBytes)
+
+		if err != nil {
+		} else {
+			serverData.CipherDef.Dsa.PrivateKey = *dsaPrivate
+		}
+	} else if cert.PublicKeyAlgorithm == x509.RSA {
+
+		// TODO do better parsing
+		privateKey, err := x509.ParsePKCS8PrivateKey(keyBlockBytes)
+		if err != nil {
+			fmt.Println("helo1")
+			fmt.Println(err)
+			privateKey, err = x509.ParsePKCS1PrivateKey(keyBlockBytes)
+			if err != nil {
+				fmt.Println("helo2")
+				fmt.Println(err)
+				privateKey, err = x509.ParseECPrivateKey(keyBlockBytes)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse private key: %v", err)
+				}
+			}
+		}
+
+		rsaKey, ok := privateKey.(*rsa.PrivateKey)
+		if ok {
+			serverData.CipherDef.Rsa.PrivateKey = *rsaKey
+		}
+	}
+	fmt.Println("key2")
+
+	rawBytes := cert.Raw
+	return rawBytes, nil
+}
+
+func StartHttpServer(params *global.Params) {
+	serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, SSLVersion: []byte{3, 0}, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: s3_cipher.CipherDef{}}
+
+	if (params) != nil {
+
+		err := serverData.loadCert(params.CertPath, params.KeyPath)
+
+		if err != nil {
+			fmt.Printf("\n problem loading certificate, err :%v", err)
+			os.Exit(1)
+		}
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:4221")
+
+	if err != nil {
+		fmt.Println("errr has occured trying while trying to connect")
+		fmt.Println(err)
+	}
+
+	conn, err := listener.Accept()
+
+	if err != nil {
+		fmt.Println("errr has occured trying while trying to connect")
+		fmt.Println(err)
+	}
+
+	if err != nil {
+		fmt.Println("errr has occured trying while accepting connection")
+		fmt.Println(err)
+	}
+
+	serverData.conn = conn
+
+	HandleConnection(conn, &serverData)
+}
+
+func HandleConnection(conn net.Conn, serverData *ServerData) {
 	defer conn.Close()
 	// TODO change hardcoded ssl version
-	serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, SSLVersion: []byte{3, 0}, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, conn: conn}
+
 	bufInit := []byte{}
 	for {
 
@@ -261,7 +427,7 @@ func HandleConnection(conn net.Conn) {
 		}
 
 		for _, msg := range msgs {
-			handleMessage(msg, conn, &serverData)
+			handleMessage(msg, conn, serverData)
 		}
 	}
 
@@ -404,7 +570,7 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) {
 	contentType := clientData[0]
 	dataContent := clientData[5:]
 	if serverData.IsEncrypted {
-		decryptedClientData := serverData.CipherDef.DecryptMessage(clientData[5:], serverData.CipherDef.CipherSuite, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+		decryptedClientData := serverData.CipherDef.DecryptMessage(clientData[5:], serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
 
 		serverData.verifyMac(contentType, decryptedClientData)
 
@@ -544,34 +710,18 @@ func handleAlert(contentData []byte, conn net.Conn) {
 }
 
 func (serverData *ServerData) loadCertificate() error {
-	// TODO: place it better
-	cert := flag.String("cert", "", "Server certificate")
-	key := flag.String("key", "", "Cert private key")
-	flag.Parse()
 
-	pwd, _ := os.Getwd()
-
-	certFileFolder := pwd + *cert
-	keyFileFolder := pwd + *key
-
-	// Load the certificate and key
-	certBytes, err := serverData.CipherDef.ParseCertificate(certFileFolder, keyFileFolder)
-
-	if err != nil {
-		return errors.New("problem passing certificate")
-	}
-
-	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(len(certBytes) + 3 + 3)
+	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(len(serverData.cert) + 3 + 3)
 	if err != nil {
 		return errors.New("problem converting record layer length to big endina")
 	}
 
-	certLengthByte, err := helpers.IntTo3BytesBigEndian(len(certBytes) + 3)
+	certLengthByte, err := helpers.IntTo3BytesBigEndian(len(serverData.cert) + 3)
 	if err != nil {
 		return errors.New("problem converting certs length to big endina")
 	}
 
-	certLengthByteSingle, err := helpers.IntTo3BytesBigEndian(len(certBytes))
+	certLengthByteSingle, err := helpers.IntTo3BytesBigEndian(len(serverData.cert))
 	if err != nil {
 		return errors.New("problem converting cert length to big endina")
 	}
@@ -581,7 +731,7 @@ func (serverData *ServerData) loadCertificate() error {
 	serverCertificate = append(serverCertificate, byte(TLSContentTypeHandshake))
 
 	// TODO 4  are bytes for handshake message type + record length, 3 are bytes for all cert length, 3 bytes are for singular cer length
-	recordLengthByte := helpers.Int32ToBigEndian(len(certBytes) + 4 + 3 + 3)
+	recordLengthByte := helpers.Int32ToBigEndian(len(serverData.cert) + 4 + 3 + 3)
 
 	serverCertificate = append(serverCertificate, serverData.SSLVersion...)
 	serverCertificate = append(serverCertificate, recordLengthByte...)
@@ -589,7 +739,7 @@ func (serverData *ServerData) loadCertificate() error {
 	serverCertificate = append(serverCertificate, handshakeLengthByte...)
 	serverCertificate = append(serverCertificate, certLengthByte...)
 	serverCertificate = append(serverCertificate, certLengthByteSingle...)
-	serverCertificate = append(serverCertificate, certBytes...)
+	serverCertificate = append(serverCertificate, serverData.cert...)
 
 	err = serverData.BuffSendData(serverCertificate)
 
@@ -1002,6 +1152,7 @@ func (serverData *ServerData) handleHandshakeClientFinished(contentData []byte) 
 		// TODO Need to throw some error/alert\
 		fmt.Println("message are different")
 		fmt.Println(contentData[:hashLen])
+		fmt.Println(inputHash[:hashLen])
 		os.Exit(1)
 
 	}
