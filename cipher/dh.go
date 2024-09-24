@@ -105,5 +105,23 @@ func (dh *DhParams) GenerateDhParams() []byte {
 // Compute the shared secret
 // client public key, server private key, prime number  client public key^server private mod p
 func (dh *DhParams) ComputePreMasterSecret() *big.Int {
+	fmt.Println("clientPublic")
+	fmt.Println("clientPublic")
+	fmt.Println("clientPublic")
+	fmt.Println("clientPublic")
+	fmt.Println("clientPublic")
+	fmt.Println("clientPublic")
+	fmt.Println("clientPublic")
+	fmt.Println("clientPublic")
+	fmt.Println("clientPublic")
+	fmt.Println("clientPublic")
+	fmt.Println("clientPublic")
+	fmt.Println(dh.ClientPublic.Bytes())
+	fmt.Println("private")
+	fmt.Println(dh.Private.Bytes())
+	fmt.Println("p")
+	fmt.Println(dh.P)
+	fmt.Println("result ")
+	fmt.Println(new(big.Int).Exp(dh.ClientPublic, dh.Private, dh.P).Bytes())
 	return new(big.Int).Exp(dh.ClientPublic, dh.Private, dh.P)
 }

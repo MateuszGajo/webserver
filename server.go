@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sync"
 	"webserver/global"
 	"webserver/http"
 )
@@ -40,6 +41,9 @@ func main() {
 
 	fmt.Println(params)
 
-	http.StartHttpServer(params)
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	http.StartHttpServer(params, &wg)
 
 }

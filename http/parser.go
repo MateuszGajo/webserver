@@ -29,7 +29,6 @@ func Parser(clientHello []byte) (output [][]byte, rest []byte, err error) {
 		version := binary.BigEndian.Uint16(clientHello[1:3])
 		// lets assume we only support ssl 3.0
 		if version != 0x0300 {
-			// TODO: maybe reutrn type of alerts, or something
 			err = errors.New("unsported ssl version, ssl 3.0 its the only supported")
 			return output, rest, err
 		}

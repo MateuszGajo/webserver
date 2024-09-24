@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -289,10 +290,11 @@ func (serverData *ServerData) verifyServerHelloDone(data []byte) error {
 	return nil
 }
 
-func (serverData *ServerData) computeKeys() {
+func (serverData *ServerData) computeKeys(data []byte) {
 	fmt.Println("before pre master")
-	preMasterSecret := serverData.CipherDef.DhParams.ComputePreMasterSecret()
+	preMasterSecret := serverData.CipherDef.ComputerMasterSecret(data)
 	fmt.Println("after pre master")
+	fmt.Println(preMasterSecret)
 
 	tripledDesHashSize := serverData.CipherDef.Spec.HashSize
 	tripledDesKeyMaterialSize := serverData.CipherDef.Spec.KeyMaterial
@@ -311,7 +313,7 @@ func (serverData *ServerData) computeKeys() {
 	fmt.Println("master key seed")
 	fmt.Println(masterKeySeed)
 
-	masterKey := ssl_prf(preMasterSecret.Bytes(), masterKeySeed, MASTER_SECRET_LENGTH)
+	masterKey := ssl_prf(preMasterSecret, masterKeySeed, MASTER_SECRET_LENGTH)
 
 	fmt.Println("master key")
 	fmt.Println(masterKey)
@@ -362,6 +364,7 @@ func (serverData *ServerData) verifyServerChangeCipher(data []byte) error {
 func (serverData *ServerData) verifyServerFinished(data []byte) error {
 	encryptedServerFinishedData := data[5:]
 	decryptedServerFinishedData := serverData.CipherDef.DecryptMessage(encryptedServerFinishedData, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
+
 	decryptedServerFinishedDataNoHeader := decryptedServerFinishedData[4:]
 
 	serverBytes := helpers.Int64ToBIgEndian(int64(serverSender))
@@ -439,6 +442,121 @@ func generateRandBytes(len int) []byte {
 
 }
 
+// lets end tihs
+
+func generateDSsCert() (*global.Params, error) {
+	cwd, err := os.Getwd()
+
+	if err != nil {
+		return nil, fmt.Errorf("Cant get root path, err: %v", err)
+	}
+	parentDir := filepath.Dir(cwd) + "/cert/dsa_test"
+
+	_, err = os.Stat(parentDir)
+
+	if err != nil {
+		err = os.Mkdir(parentDir, 0775)
+		if err != nil {
+			fmt.Printf("problem creating folder, err: %v", err)
+		}
+	}
+
+	cmd := exec.Command("openssl", "dsaparam", "-out", "dsa_param.pem", "2048")
+
+	cmd.Dir = parentDir
+
+	// Run the command and capture output (if needed)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n", err)
+		fmt.Printf("Output: %s\n", string(output))
+		return nil, nil
+	}
+
+	return nil, nil
+}
+
+// Go doesnt support really dss, lets create alternative with terminal
+// func generateDssCert() (*global.Params, error) {
+// 	cwd, err := os.Getwd()
+
+// 	if err != nil {
+// 		return nil, fmt.Errorf("Cant get root path, err: %v", err)
+// 	}
+
+// 	parentDir := filepath.Dir(cwd)
+
+// 	var params dsa.Parameters
+
+// 	err = dsa.GenerateParameters(&params, rand.Reader, dsa.L2048N224)
+
+// 	if err != nil {
+// 		return nil, fmt.Errorf("problem generting dss params, err: %v", err)
+// 	}
+
+// 	var privateKey dsa.PrivateKey
+
+// 	privateKey.Parameters = params
+
+// 	dsa.GenerateKey(&privateKey, rand.Reader)
+
+// 	privateKeyAsn1, err := asn1.Marshal(privateKey)
+
+// 	if err != nil {
+// 		return nil, fmt.Errorf("cant convert dsa private key to pkcs8, err:%v", err)
+// 	}
+
+// 	if _, err := os.Stat(parentDir + "/cert/dsa_test"); os.IsNotExist(err) {
+// 		// 2. Folder does not exist, create it
+// 		err := os.Mkdir(parentDir+"/cert/dsa_test", 0755) // Permission mode: 0755 allows read/write/execute for owner and read/execute for others.
+// 		if err != nil {
+// 			return nil, fmt.Errorf("Error creating folder: %v", err)
+// 		}
+// 		fmt.Println("Folder created: dsa test")
+// 	}
+
+// 	keyFile, err := os.Create(parentDir + "/cert/dsa_test/" + "dsa.pem")
+
+// 	defer keyFile.Close()
+
+// 	pem.Encode(keyFile, &pem.Block{
+// 		Type:  "DSA PRIVATE KEY",
+// 		Bytes: privateKeyAsn1,
+// 	})
+
+// 	template := x509.Certificate{
+// 		SerialNumber: big.NewInt(1), // Serial number for the certificate
+// 		Subject: pkix.Name{
+// 			Organization: []string{"Your Company"},
+// 			CommonName:   "localhost",
+// 		},
+// 		NotBefore:             time.Now(),
+// 		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // Valid for 1 year
+// 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+// 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+// 		BasicConstraintsValid: true,
+// 		IsCA:                  true, // Certificate Authority (CA)
+// 	}
+
+// 	certDer, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+
+// 	if err != nil {
+// 		return nil, fmt.Errorf("Problem generting cert der, err: %v", err)
+// 	}
+
+// 	certFile, err := os.Create(parentDir + "/cert/dsa_test/" + "cer.pem")
+
+// 	defer keyFile.Close()
+
+// 	pem.Encode(certFile, &pem.Block{
+// 		Type:  "CERTIFICATE",
+// 		Bytes: certDer,
+// 	})
+
+// 	return nil, nil
+// }
+
 func generateRsaCert() (*global.Params, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -469,7 +587,7 @@ func generateRsaCert() (*global.Params, error) {
 		fmt.Println("Folder created: rsa test")
 	}
 
-	keyFile, err := os.Create(parentDir + "/cert/rsa_test/" + "private_key.key")
+	keyFile, err := os.Create(parentDir + "/cert/rsa_test/" + "server.key")
 
 	if err != nil {
 		return nil, fmt.Errorf("Problem creating file for key err: %v", err)
@@ -478,7 +596,7 @@ func generateRsaCert() (*global.Params, error) {
 	defer keyFile.Close()
 
 	pem.Encode(keyFile, &pem.Block{
-		Type:  "RSA PRIVATE KEY",
+		Type:  "PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
 	})
 	fmt.Println("cert created?")
@@ -518,7 +636,7 @@ func generateRsaCert() (*global.Params, error) {
 
 	return &global.Params{
 		CertPath: parentDir + "/cert/rsa_test/server.crt",
-		KeyPath:  parentDir + "/cert/rsa_test/private_key.key",
+		KeyPath:  parentDir + "/cert/rsa_test/server.key",
 	}, nil
 
 }
@@ -529,8 +647,7 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 	wg.Add(1)
 
 	go func() {
-		wg.Done()
-		StartHttpServer(nil)
+		StartHttpServer(nil, &wg)
 	}()
 
 	wg.Wait()
@@ -599,7 +716,7 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 
 	serverData.CipherDef.DhParams.Private = private
 
-	serverData.computeKeys()
+	serverData.computeKeys([]byte{0, 1, 2})
 
 	clientKeyExchangeMsg := []byte{22, 3, 0, 0, 7, 16, 0, 0, 3, 0, 1, 2}
 	clientChangeCipher := []byte{20, 3, 0, 0, 1, 1}
@@ -635,7 +752,7 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 	}
 }
 
-func (serverData *ServerData) verifyCertificate(data []byte) error {
+func (serverData *ServerData) verifyCertificate(data []byte) (*x509.Certificate, error) {
 
 	// 22 3 0 3 63 11 0 3 59 0 3 56 0 3 53 48
 	recType := data[0]
@@ -650,14 +767,14 @@ func (serverData *ServerData) verifyCertificate(data []byte) error {
 	cert, err := x509.ParseCertificate(certificate)
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	fmt.Println("yey parsed cert")
 	switch serverData.CipherDef.Spec.SignatureAlgorithm {
 	case cipher.SignatureAlgorithmRSA:
 		if cert.PublicKeyAlgorithm != x509.RSA {
-			return errors.New("Wring encryptiuon algo")
+			return nil, errors.New("Wring encryptiuon algo")
 		}
 	default:
 		fmt.Println("unsported singature in paersing cert")
@@ -665,20 +782,20 @@ func (serverData *ServerData) verifyCertificate(data []byte) error {
 	}
 
 	if recType != byte(TLSContentTypeHandshake) {
-		return fmt.Errorf("should return tls handshake type")
+		return nil, fmt.Errorf("should return tls handshake type")
 	}
 
 	if sslVersion != SSL30Version {
-		return fmt.Errorf("version should be ssl 3.0")
+		return nil, fmt.Errorf("version should be ssl 3.0")
 	}
 
 	if handshakeType != byte(TLSHandshakeMessageCertificate) {
-		return fmt.Errorf("Handshake type should be server hello")
+		return nil, fmt.Errorf("Handshake type should be server hello")
 	}
 
 	//TODO add condition checking bytes length
 
-	return nil
+	return cert, nil
 }
 
 func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
@@ -693,11 +810,15 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 	wg.Add(1)
 
 	go func() {
-		wg.Done()
-		StartHttpServer(params)
+		StartHttpServer(params, &wg)
 	}()
 
 	wg.Wait()
+
+	fmt.Println("lets connect?s")
+	fmt.Println("lets connect?")
+	fmt.Println("lets connect?")
+	fmt.Println("lets connect?")
 
 	conn, err := net.Dial("tcp", "127.0.0.1:4221")
 
@@ -711,7 +832,7 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 		CipherDef: cipher.CipherDef{
 			Spec: cipher.CipherSpec{
 				HashAlgorithm:       cipher.HashAlgorithmSHA,
-				KeyExchange:         cipher.KeyExchangeMethodDHE,
+				KeyExchange:         cipher.KeyExchangeMethodDH,
 				HashSize:            20,
 				KeyMaterial:         24,
 				IvSize:              8,
@@ -762,7 +883,7 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("\n Problem with serverHello msg, err: %v", err)
 	}
 
-	err = serverData.verifyCertificate(certificate)
+	_, err = serverData.verifyCertificate(certificate)
 
 	if err != nil {
 		t.Errorf("\n Problem with cserver ertificate msg, err: %v", err)
@@ -787,11 +908,10 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 	serverData.CipherDef.DhParams.Private = private
 	fmt.Println("before compute")
 
-	serverData.computeKeys()
-
 	fmt.Println("after ocmpute")
 
 	clientKeyExchangeMsg := []byte{22, 3, 0, 0, 7, 16, 0, 0, 3, 0, 1, 2}
+	serverData.computeKeys([]byte{0, 1, 2})
 	clientChangeCipher := []byte{20, 3, 0, 0, 1, 1}
 
 	conn.Write(clientKeyExchangeMsg)
@@ -829,4 +949,333 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 	if err != nil {
 		t.Errorf("Problem with verify server finished %v", err)
 	}
+
+}
+
+func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
+	var wg sync.WaitGroup
+
+	params, err := generateRsaCert()
+
+	if err != nil {
+		t.Errorf("\n problem generating rsa cert, err: %v", err)
+	}
+
+	wg.Add(1)
+
+	go func() {
+		StartHttpServer(params, &wg)
+	}()
+
+	wg.Wait()
+
+	conn, err := net.Dial("tcp", "127.0.0.1:4221")
+
+	if err != nil {
+		t.Error("problem connectin to server")
+	}
+
+	serverData := &ServerData{
+		ClientRandom: generateRandBytes(32),
+		SSLVersion:   []byte{3, 0},
+		CipherDef: cipher.CipherDef{
+			Spec: cipher.CipherSpec{
+				HashAlgorithm:       cipher.HashAlgorithmSHA,
+				KeyExchange:         cipher.KeyExchangeMethodRSA,
+				HashSize:            20,
+				KeyMaterial:         24,
+				IvSize:              8,
+				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
+				SignatureAlgorithm:  cipher.SignatureAlgorithmRSA,
+			},
+			CipherSuite: uint16(cipher.TLS_CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA),
+		},
+		ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
+	}
+
+	_, err = serverData.ParseCertificate(params.CertPath, params.KeyPath)
+
+	if err != nil {
+		t.Errorf("\n cant parse ceritifcate, err: %v", err)
+	}
+
+	// TODO: fix becasue it was  passing even we pass mor ethan 32 bytes of random bytes
+
+	clientHello := serverData.generateClientHello()
+
+	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientHello[5:])
+
+	_, err = conn.Write(clientHello)
+
+	if err != nil {
+		t.Errorf("Problem writing client hello, err: %v", err)
+	}
+
+	data, err := readNMessage(3, conn)
+
+	if err != nil {
+		t.Errorf("Problem reading server hello msgs, expected to read 4 messages, err: %v", err)
+	}
+
+	serverHello := data[0]
+	certificate := data[1]
+
+	// serverKeyExchange := data[2]
+	serverHelloDone := data[2]
+
+	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHello[5:])
+	serverData.HandshakeMessages = append(serverData.HandshakeMessages, certificate[5:])
+	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverKeyExchange[5:])
+	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHelloDone[5:])
+
+	fmt.Println("messages")
+	fmt.Println(data)
+
+	err = serverData.verifyServerHello(serverHello)
+
+	fmt.Println("after verify client hello")
+
+	if err != nil {
+		t.Errorf("\n Problem with serverHello msg, err: %v", err)
+	}
+
+	cert, err := serverData.verifyCertificate(certificate)
+
+	if err != nil {
+		t.Errorf("\n Problem with cserver ertificate msg, err: %v", err)
+	}
+
+	err = serverData.verifyServerHelloDone(serverHelloDone)
+	fmt.Println("after server hello done")
+	if err != nil {
+		t.Errorf("\n Problem with serverKeyExchange msg, err: %v", err)
+	}
+
+	pubKey := cert.PublicKey
+
+	pubRsaKey, ok := pubKey.(*rsa.PublicKey)
+
+	if !ok {
+		t.Errorf("\n can't convert pubKey to rsa pub key, err: %v", err)
+	}
+
+	preMasterKey := []byte{3, 0}
+	preMasterKey = append(preMasterKey, generateRandBytes(46)...)
+
+	fmt.Println("premasterkey")
+	fmt.Println(preMasterKey)
+
+	decrypted, err := rsa.EncryptPKCS1v15(rand.Reader, pubRsaKey, preMasterKey)
+
+	if err != nil {
+		t.Errorf("cant encrypted pre masterkey, err: %v", err)
+	}
+
+	clientKeyExchangeMsg := []byte{22, 3, 0}
+	recordLength := helpers.Int32ToBigEndian(len(decrypted) + 4)
+	clientKeyExchangeMsg = append(clientKeyExchangeMsg, recordLength...)
+	clientKeyExchangeMsg = append(clientKeyExchangeMsg, 16)
+	contentLength, err := helpers.IntTo3BytesBigEndian(len(decrypted))
+	if err != nil {
+		t.Errorf("cant convert decrypted len to big endian, err:%v", err)
+	}
+	clientKeyExchangeMsg = append(clientKeyExchangeMsg, contentLength...)
+	clientKeyExchangeMsg = append(clientKeyExchangeMsg, decrypted...)
+	clientChangeCipher := []byte{20, 3, 0, 0, 1, 1}
+	serverData.computeKeys(clientKeyExchangeMsg[9:])
+
+	conn.Write(clientKeyExchangeMsg)
+	fmt.Println("client key exchange")
+	conn.Write(clientChangeCipher)
+	fmt.Println("change cipoher")
+
+	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientKeyExchangeMsg[5:])
+
+	finishedMsg := serverData.generateClientFinishedMsg()
+	fmt.Println("generate client finished msg")
+	_, err = conn.Write(finishedMsg)
+	fmt.Println("sent client finished")
+	if err != nil {
+		t.Errorf("Problem writing client finished messgae :%v", err)
+	}
+
+	data, err = readNMessage(2, conn)
+	if err != nil {
+		t.Errorf("Problem reading server chage cipher and server finished msgs, err: %v", err)
+	}
+
+	fmt.Println("parsing next")
+	serverChangeCipher := data[0]
+	serverFinished := data[1]
+
+	err = serverData.verifyServerChangeCipher(serverChangeCipher)
+
+	if err != nil {
+		t.Errorf("Problem with verify server change cipher msg:%v", err)
+	}
+
+	err = serverData.verifyServerFinished(serverFinished)
+
+	if err != nil {
+		t.Errorf("Problem with verify server finished %v", err)
+	}
+
+}
+
+func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
+	// var wg sync.WaitGroup
+
+	_, err := generateDSsCert()
+	if err != nil {
+		t.Error(err)
+	}
+	t.Error("fd")
+
+	// if err != nil {
+	// 	t.Errorf("\n problem generating rsa cert, err: %v", err)
+	// }
+
+	// wg.Add(1)
+
+	// go func() {
+	// 	StartHttpServer(params, &wg)
+	// }()
+
+	// wg.Wait()
+
+	// fmt.Println("lets connect?s")
+	// fmt.Println("lets connect?")
+	// fmt.Println("lets connect?")
+	// fmt.Println("lets connect?")
+
+	// conn, err := net.Dial("tcp", "127.0.0.1:4221")
+
+	// if err != nil {
+	// 	t.Error("problem connectin to server")
+	// }
+
+	// serverData := &ServerData{
+	// 	ClientRandom: generateRandBytes(32),
+	// 	SSLVersion:   []byte{3, 0},
+	// 	CipherDef: cipher.CipherDef{
+	// 		Spec: cipher.CipherSpec{
+	// 			HashAlgorithm:       cipher.HashAlgorithmSHA,
+	// 			KeyExchange:         cipher.KeyExchangeMethodDH,
+	// 			HashSize:            20,
+	// 			KeyMaterial:         24,
+	// 			IvSize:              8,
+	// 			EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
+	// 			SignatureAlgorithm:  cipher.SignatureAlgorithmRSA,
+	// 		},
+	// 		CipherSuite: uint16(cipher.TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA),
+	// 	},
+	// 	ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
+	// }
+	// // TODO: fix becasue it was  passing even we pass mor ethan 32 bytes of random bytes
+
+	// clientHello := serverData.generateClientHello()
+
+	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientHello[5:])
+
+	// _, err = conn.Write(clientHello)
+
+	// if err != nil {
+	// 	t.Errorf("Problem writing client hello, err: %v", err)
+	// }
+
+	// data, err := readNMessage(4, conn)
+
+	// if err != nil {
+	// 	t.Errorf("Problem reading server hello msgs, expected to read 4 messages, err: %v", err)
+	// }
+
+	// serverHello := data[0]
+	// certificate := data[1]
+
+	// serverKeyExchange := data[2]
+	// serverHelloDone := data[3]
+
+	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHello[5:])
+	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, certificate[5:])
+	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverKeyExchange[5:])
+	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHelloDone[5:])
+
+	// fmt.Println("messages")
+	// fmt.Println(data)
+
+	// err = serverData.verifyServerHello(serverHello)
+
+	// fmt.Println("after verify client hello")
+
+	// if err != nil {
+	// 	t.Errorf("\n Problem with serverHello msg, err: %v", err)
+	// }
+
+	// _, err = serverData.verifyCertificate(certificate)
+
+	// if err != nil {
+	// 	t.Errorf("\n Problem with cserver ertificate msg, err: %v", err)
+	// }
+
+	// // TODO: we're missing singature verification
+	// err = serverData.verifyServerKeyExchange(serverKeyExchange)
+	// fmt.Println("after verify server key exchange")
+
+	// if err != nil {
+	// 	t.Errorf("\n Problem with serverKeyExchange msg, err: %v", err)
+	// }
+
+	// err = serverData.verifyServerHelloDone(serverHelloDone)
+	// fmt.Println("after server hello done")
+	// if err != nil {
+	// 	t.Errorf("\n Problem with serverKeyExchange msg, err: %v", err)
+	// }
+
+	// private := big.NewInt(3)
+
+	// serverData.CipherDef.DhParams.Private = private
+	// fmt.Println("before compute")
+
+	// fmt.Println("after ocmpute")
+
+	// clientKeyExchangeMsg := []byte{22, 3, 0, 0, 7, 16, 0, 0, 3, 0, 1, 2}
+	// serverData.computeKeys([]byte{0, 1, 2})
+	// clientChangeCipher := []byte{20, 3, 0, 0, 1, 1}
+
+	// conn.Write(clientKeyExchangeMsg)
+	// fmt.Println("client key exchange")
+	// conn.Write(clientChangeCipher)
+	// fmt.Println("change cipoher")
+
+	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientKeyExchangeMsg[5:])
+
+	// finishedMsg := serverData.generateClientFinishedMsg()
+	// fmt.Println("generate client finished msg")
+	// _, err = conn.Write(finishedMsg)
+	// fmt.Println("sent client finished")
+	// if err != nil {
+	// 	t.Errorf("Problem writing client finished messgae :%v", err)
+	// }
+
+	// data, err = readNMessage(2, conn)
+	// if err != nil {
+	// 	t.Errorf("Problem reading server chage cipher and server finished msgs, err: %v", err)
+	// }
+
+	// fmt.Println("parsing next")
+	// serverChangeCipher := data[0]
+	// serverFinished := data[1]
+
+	// err = serverData.verifyServerChangeCipher(serverChangeCipher)
+
+	// if err != nil {
+	// 	t.Errorf("Problem with verify server change cipher msg:%v", err)
+	// }
+
+	// err = serverData.verifyServerFinished(serverFinished)
+
+	// if err != nil {
+	// 	t.Errorf("Problem with verify server finished %v", err)
+	// }
+
 }

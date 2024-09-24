@@ -55,28 +55,55 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte) []byte {
 }
 
 func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) []byte {
+	fmt.Println("enter??? ")
+	fmt.Println("enter??? ")
+	fmt.Println("enter??? ")
 	var preMasterSecret []byte
 	switch cipherDef.Spec.KeyExchange {
 	case KeyExchangeMethodDH:
 
+		fmt.Println("compute master secret dat")
+		fmt.Println("compute master secret dat")
+		fmt.Println("compute master secret dat")
+		fmt.Println(data)
+
 		clientPublicKeyLength := binary.BigEndian.Uint16(data[:2])
-		clientPublicKey := data[:6+clientPublicKeyLength]
+		// TODO: fix this, we coudl passed data[:6+clientPublicKeyLength] and somehow worked
+		clientPublicKey := data[2 : 2+clientPublicKeyLength]
+		fmt.Println("compute master secret dat")
+		fmt.Println("compute master secret dat")
+		fmt.Println(data)
+		fmt.Println("pub key")
+		fmt.Println(clientPublicKey)
 
 		clinetPublicKeyInt := new(big.Int).SetBytes(clientPublicKey)
 		cipherDef.DhParams.ClientPublic = clinetPublicKeyInt
 		preMasterSecret = cipherDef.DhParams.ComputePreMasterSecret().Bytes()
 	case KeyExchangeMethodRSA:
+		fmt.Println("data enters")
+		fmt.Println("data enters")
+		fmt.Println(cipherDef.Rsa.PrivateKey)
 		decrypted, err := rsa.DecryptPKCS1v15(rand.Reader, &cipherDef.Rsa.PrivateKey, data)
+
+		fmt.Println("decrypted rsa!!")
+		fmt.Println("decrypted rsa!!")
+		fmt.Println("decrypted rsa!!")
+		fmt.Println(len(decrypted))
+		fmt.Println(decrypted)
 		if err != nil {
-			fmt.Println("couldnt decrypt rsa")
+			fmt.Printf("couldnt decrypt rsa, err: %v", err)
 			os.Exit(1)
 		}
 		preMasterSecret = decrypted
 	case KeyExchangeMethodDHE:
+		fmt.Print("Key exchang dhe not implemented")
+		os.Exit(1)
 	default:
 		fmt.Print("Key exchang method not implmeneted yet")
 		os.Exit(1)
 	}
+
+	fmt.Println("skip all??")
 
 	return preMasterSecret
 
@@ -97,7 +124,7 @@ type DSA_SIG struct {
 	S *big.Int
 }
 
-func i2d_DSA_SIG(sig *DSA_SIG) ([]byte, error) {
+func DSAtoASN1(sig *DSA_SIG) ([]byte, error) {
 	// The DSA signature (r, s) will be encoded as an ASN.1 sequence
 	return asn1.Marshal(*sig)
 }
@@ -141,10 +168,12 @@ func (cipherDef *CipherDef) SignParams(hash []byte) []byte {
 	case SignatureAlgorithmDSA:
 
 		r, s, err := dsa.Sign(rand.Reader, &cipherDef.Dsa.PrivateKey, hash)
-		// TODO check if rsa signin is actualy saving it in asn format
-		signnn, err := i2d_DSA_SIG(&DSA_SIG{R: r, S: s})
 		if err != nil {
-			fmt.Println("error occured while doing some anc1")
+			fmt.Printf("\n error while singing, err: %v", err)
+		}
+		signnn, err := DSAtoASN1(&DSA_SIG{R: r, S: s})
+		if err != nil {
+			fmt.Println("\n error occured while doing some anc1, err:%v", err)
 		}
 
 		if err != nil {
@@ -177,7 +206,7 @@ func (cipherDef *CipherDef) SelectCipherSuite(cipherSuites []byte) []byte {
 	// TODO implement this
 	cipherDef.CipherSuite = cipherList[0]
 
-	// TODO should also setup this
+	// TODO and make this better
 	cipherDef.GetCipherSpecInfo()
 
 	return []byte{0, 27}
@@ -192,8 +221,6 @@ func (cipherDef *CipherDef) SelectCompressionMethod() []byte {
 	return []byte{0}
 
 }
-
-// TODO implement RSA, DHE, move to ciphers?
 
 func (cipherDef *CipherDef) GetCipherSpecInfo() {
 	//TODO  fill all data
@@ -213,8 +240,6 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		cipherDef.Spec.KeyMaterial = 24
 		cipherDef.Spec.IvSize = 8
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
-		// TODO change this to DHE
-		// TODO roate his when using DHE
 		cipherDef.Spec.KeyExchange = KeyExchangeMethodRSA
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
 		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA
@@ -232,7 +257,7 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		cipherDef.Spec.IvSize = 8
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
 		// TODO change this to DHE
-		// TODO roate his when using DHE
+		// TODO roate keys when using DHE
 		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
 		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmDSA
@@ -244,7 +269,7 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		cipherDef.Spec.IvSize = 8
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
 		// TODO change this to DHE
-		// TODO roate his when using DHE
+		// TODO roate keys when using DHE
 		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
 		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA
