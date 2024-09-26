@@ -173,7 +173,7 @@ func (cipherDef *CipherDef) SignParams(hash []byte) []byte {
 		}
 		signnn, err := DSAtoASN1(&DSA_SIG{R: r, S: s})
 		if err != nil {
-			fmt.Println("\n error occured while doing some anc1, err:%v", err)
+			fmt.Printf("\n error occured while doing some anc1, err:%v", err)
 		}
 
 		if err != nil {
@@ -185,7 +185,6 @@ func (cipherDef *CipherDef) SignParams(hash []byte) []byte {
 		resp = append(resp, []byte{0, byte(lengthhh)}...)
 		resp = append(resp, signnn...)
 
-		fmt.Printf("Algorithm: %v not implemented yet", cipherDef.Spec.SignatureAlgorithm)
 	default:
 		fmt.Printf("Unsupported Algorithm: %v", cipherDef.Spec.SignatureAlgorithm)
 		os.Exit(1)

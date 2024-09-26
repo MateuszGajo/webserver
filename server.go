@@ -22,7 +22,7 @@ func loadParams() *global.Params {
 	pwd, err := os.Getwd()
 
 	if err != nil {
-		fmt.Println("Cannot get root path, err:%v", err)
+		fmt.Printf("\n cannot get root path, err:%v", err)
 		os.Exit(1)
 	}
 
@@ -44,6 +44,10 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	http.StartHttpServer(params, &wg)
+	server := global.Server{
+		Wg: &wg,
+	}
+
+	http.StartHttpServer(params, &server)
 
 }

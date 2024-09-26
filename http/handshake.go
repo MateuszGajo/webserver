@@ -17,7 +17,6 @@ import (
 	"net"
 	"os"
 	"reflect"
-	"sync"
 	"time"
 	s3_cipher "webserver/cipher"
 	"webserver/global"
@@ -425,7 +424,7 @@ func (serverData *ServerData) ParseCertificate(certFile, keyFile string) ([]byte
 	return rawBytes, nil
 }
 
-func StartHttpServer(params *global.Params, wg *sync.WaitGroup) {
+func StartHttpServer(params *global.Params, server *global.Server) {
 	serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, SSLVersion: []byte{3, 0}, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: s3_cipher.CipherDef{}}
 
 	if (params) != nil {
@@ -443,8 +442,8 @@ func StartHttpServer(params *global.Params, wg *sync.WaitGroup) {
 		fmt.Println("errr has occured trying while trying to connect")
 		fmt.Println(err)
 	}
-	wg.Done()
-
+	server.Wg.Done()
+	server.Conn = listener
 	conn, err := listener.Accept()
 
 	if err != nil {
@@ -635,7 +634,16 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) {
 	contentType := clientData[0]
 	dataContent := clientData[5:]
 	if serverData.IsEncrypted {
+		fmt.Println("enter")
+		fmt.Println("eecrypted data")
+		fmt.Println(clientData)
+		fmt.Println("write key")
+		fmt.Println(serverData.CipherDef.Keys.IVClient)
+		fmt.Println("iv")
+		fmt.Println(serverData.CipherDef.Keys.IVClient)
 		decryptedClientData := serverData.CipherDef.DecryptMessage(clientData[5:], serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+		fmt.Println("decrypted data")
+		fmt.Println(decryptedClientData)
 
 		serverData.verifyMac(contentType, decryptedClientData)
 
@@ -666,8 +674,16 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) {
 }
 
 func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) {
-	clientDataLength := int32(contentData[1])<<16 | int32(contentData[2])<<8 | int32(contentData[3])
-	clientDataWithHeader := 4 + clientDataLength
+	fmt.Println("verify mac")
+	fmt.Println(contentType)
+	fmt.Println(contentData)
+	var clientDataWithHeader int32
+	if contentType == 22 {
+		clientDataLength := int32(contentData[1])<<16 | int32(contentData[2])<<8 | int32(contentData[3])
+		clientDataWithHeader = 4 + clientDataLength
+	} else if contentType == 21 {
+		clientDataWithHeader = 2
+	}
 
 	dataSent := contentData[:clientDataWithHeader]
 
@@ -813,6 +829,9 @@ func (serverData *ServerData) loadCertificate() error {
 }
 
 func (serverData *ServerData) sendData(data []byte) (n int, err error) {
+
+	fmt.Println("send data")
+	fmt.Println(data)
 
 	n, err = serverData.conn.Write(data)
 	if err != nil {
