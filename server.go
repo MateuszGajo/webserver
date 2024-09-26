@@ -6,7 +6,7 @@ import (
 	"os"
 	"sync"
 	"webserver/global"
-	"webserver/http"
+	"webserver/handshake"
 )
 
 func loadParams() *global.Params {
@@ -48,6 +48,6 @@ func main() {
 		Wg: &wg,
 	}
 
-	http.StartHttpServer(params, &server)
+	handshake.StartHttpServer(params, &server)
 
 }

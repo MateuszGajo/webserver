@@ -9,7 +9,7 @@ import (
 	"time"
 	"webserver/controller"
 	"webserver/http"
-	"webserver/parser"
+	"webserver/httpParser"
 )
 
 type ServerConfig struct {
@@ -143,7 +143,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 		msg := string(buf[:n])
 
-		req := parser.ParseRequest(msg)
+		req := httpParser.ParseRequest(msg)
 
 		resp := http.RunHandler(req.RequestLine.Path, req.RequestLine.ReqType, conn, s.HttpConfig)
 
