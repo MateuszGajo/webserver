@@ -34,24 +34,26 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []
 	return []byte{}
 }
 
-func (cipherDef *CipherDef) EncryptMessage(data []byte) []byte {
-
+func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) []byte {
+	var encryptedMsg []byte
 	switch TLSCipherSuite(cipherDef.CipherSuite) {
 	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
-		return EncryptDesMessage(data, cipherDef.Keys.WriteKeyServer, cipherDef.Keys.IVServer)
+		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
 	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
-		return EncryptDesMessage(data, cipherDef.Keys.WriteKeyServer, cipherDef.Keys.IVServer)
+		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
 	case TLS_CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA:
-		return EncryptDesMessage(data, cipherDef.Keys.WriteKeyServer, cipherDef.Keys.IVServer)
+		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
 	case TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA:
-		return EncryptDesMessage(data, cipherDef.Keys.WriteKeyServer, cipherDef.Keys.IVServer)
+		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
 		os.Exit(1)
 
 	}
 
-	return []byte{}
+	cipherDef.Keys.IVServer = encryptedMsg[len(encryptedMsg)-8:]
+
+	return encryptedMsg
 }
 
 func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) []byte {

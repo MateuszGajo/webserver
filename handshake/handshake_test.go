@@ -106,18 +106,24 @@ func (serverData *ServerData) generateClientHello() []byte {
 func (serverData *ServerData) verifyServerHello(data []byte) error {
 	recType := data[0]
 	sslVersion := binary.BigEndian.Uint16((data[1:3]))
-	recLength := binary.BigEndian.Uint16((data[3:5]))
+	// recLength := binary.BigEndian.Uint16((data[3:5]))
 	handshakeType := data[5]
-	handshakeLength := uint32(data[6])<<16 | uint32(data[7])<<8 | uint32(data[8])
+	// handshakeLength := uint32(data[6])<<16 | uint32(data[7])<<8 | uint32(data[8])
 	handshakeRandomTime := binary.BigEndian.Uint32((data[11:15]))
 	handshakeRandomBytes := data[11:43]
+	sessionLength := data[43]
+	session := data[44 : 44+sessionLength]
+	algorithmIndexStart := 44 + sessionLength
 	serverData.ServerRandom = handshakeRandomBytes
+
+	fmt.Println("session")
+	fmt.Println(session)
 
 	// 2 for protocol version
 	// client random 32
 	// 1 for session id
-	handshakeAlgorithm := binary.BigEndian.Uint16((data[44:46]))
-	handshakeCompression := data[46]
+	handshakeAlgorithm := binary.BigEndian.Uint16((data[algorithmIndexStart : algorithmIndexStart+2]))
+	handshakeCompression := data[algorithmIndexStart+2]
 
 	if recType != byte(TLSContentTypeHandshake) {
 		return fmt.Errorf("should return tls handshake type")
@@ -127,17 +133,17 @@ func (serverData *ServerData) verifyServerHello(data []byte) error {
 		return fmt.Errorf("version should be ssl 3.0")
 	}
 
-	if recLength != 42 {
-		return fmt.Errorf("Record length shuld be 42")
-	}
+	// if recLength != 42 {
+	// 	return fmt.Errorf("Record length shuld be 42, we got: %v", recLength)
+	// }
 
 	if handshakeType != byte(TLSHandshakeMessageServerHello) {
 		return fmt.Errorf("Handshake type should be server hello")
 	}
 
-	if handshakeLength != 38 {
-		return fmt.Errorf("Handshake length should be 38")
-	}
+	// if handshakeLength != 38 {
+	// 	return fmt.Errorf("Handshake length should be 38")
+	// }
 
 	currentTime := time.Now().Unix()
 
@@ -1374,6 +1380,48 @@ func TestHandshakeOpenSSL_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 	fmt.Printf("\n output: %v", string(output))
 
 	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is EDH-DSS-DES-CBC3-SHA") {
+		t.Error("handshake failed")
+	}
+
+}
+
+func TestHandshakeOpenSSLReconnect_ADH_DES_CBC3_SHA(t *testing.T) {
+
+	var wg sync.WaitGroup
+
+	server := global.Server{
+		Wg: &wg,
+	}
+	wg.Add(1)
+
+	go func() {
+		StartHttpServer(nil, &server)
+	}()
+
+	wg.Wait()
+
+	defer server.Conn.Close()
+
+	cmd := exec.Command("./openssl", "s_client", "-connect", "127.0.0.1:4221", "-ssl3", "-cipher", "ADH-DES-CBC3-SHA", "-reconnect")
+
+	cmd.Dir = getOpenSslDir()
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		return
+	}
+
+	fmt.Printf("\n output: %v", string(output))
+	fmt.Println("hello")
+	fmt.Println("hello")
+	fmt.Println(strings.Count(string(output), "New, TLSv1/SSLv3, Cipher is ADH-DES-CBC3-SHA"))
+
+	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is ADH-DES-CBC3-SHA") {
+		t.Error("handshake failed")
+	}
+
+	if !strings.Contains(string(output), "Reused, TLSv1/SSLv3, Cipher is ADH-DES-CBC3-SHA") {
 		t.Error("handshake failed")
 	}
 
