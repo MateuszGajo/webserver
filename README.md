@@ -7,7 +7,7 @@ Project supports 4 ciphers of ssl 3.0:
 * ADH-DES-CBC3-SHA
 
 Support features:
-session resumption
+* session resumption (testing phase)
 
 It has been tested with openssl 0.9.7e.
 Not all the features work but let's hope they will soon :)
