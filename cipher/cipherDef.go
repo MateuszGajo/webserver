@@ -63,21 +63,24 @@ type CipherSpec struct {
 }
 
 type CipherDef struct {
-	Keys              CipherKeys
-	Spec              CipherSpec
-	CipherSuite       uint16
-	CompressionMethod byte
-	DhParams          DhParams
-	Rsa               RsaCipher
-	Dsa               DsaCipher
+	Keys               CipherKeys
+	Spec               CipherSpec
+	CipherSuite        uint16
+	CompressionMethod  byte
+	DhParams           DhParams
+	Rsa                RsaCipher
+	Dsa                DsaCipher
+	PreferServerCipher bool
 }
 
 type RsaCipher struct {
 	PrivateKey rsa.PrivateKey
+	PublicKey  rsa.PublicKey
 }
 
 type DsaCipher struct {
 	PrivateKey dsa.PrivateKey
+	PublicKey  dsa.PublicKey
 }
 
 type DhParams struct {

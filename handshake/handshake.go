@@ -492,7 +492,6 @@ func HandleConnection(conn net.Conn, serverData *ServerData) {
 		bufInit = partial
 
 		if err != nil {
-			// TODO it should send an alert msg and then close conn
 			fmt.Printf("\n parser error: %v", err)
 			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
 
@@ -505,7 +504,6 @@ func HandleConnection(conn net.Conn, serverData *ServerData) {
 
 }
 
-// TODO: use this alert throughout code, write some tests
 func (serverData *ServerData) sendAlertMsg(level TlSAlertLevel, description TLSAlertDescription) {
 	msg := []byte{byte(TLSContentTypeAlert)}
 	msg = append(msg, serverData.SSLVersion...)
@@ -806,7 +804,7 @@ func (serverData *ServerData) loadCertificate() error {
 
 	serverCertificate = append(serverCertificate, byte(TLSContentTypeHandshake))
 
-	// TODO 4 are bytes for handshake message type + record length, 3 are bytes for crts' length, 3 bytes are for cert(single);s len
+	// 4 are bytes for handshake message type + record length, 3 are bytes for crts' length, 3 bytes are for cert(single);s len
 	recordLengthByte := helpers.Int32ToBigEndian(len(serverData.cert) + 4 + 3 + 3)
 
 	serverCertificate = append(serverCertificate, serverData.SSLVersion...)
@@ -968,24 +966,29 @@ func (serverData *ServerData) handleHandshakeSessionResumstion(contentData []byt
 }
 
 func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) error {
-
-	fmt.Println("handshake ClientHello")
-	fmt.Println(contentData)
-
-	clientVersion := binary.BigEndian.Uint16(contentData[4:6]) // backward compability, used to dicated which version to use, now we have version in protocol header.
-
-	switch clientVersion {
-	case 0x0200:
-		fmt.Println("CLient version: SSL 2.0")
-	case 0x0300:
-		fmt.Println("Client version: SSL 3.0")
+	contentLength := int(contentData[1])<<16 | int(contentData[2])<<8 | int(contentData[3])
+	dataContentExpectedLen := contentLength + 4 // 4: 1 bytefor content type, 3 bytes for length
+	if dataContentExpectedLen != len(contentData) {
+		return fmt.Errorf("conent length does not fit data passed, expected to have length of: %v, got: %v", dataContentExpectedLen, len(contentData))
 	}
 
-	// radnomBytesTime := binary.BigEndian.Uint32(contentData[6:10])
-	// radnomBytesData := contentData[10:38]
+	clientVersion := contentData[4:6] // backward compability, used to dicated which version to use, now we have version in protocol header.
 
-	sessionLength := contentData[38]
-	sessionIndexEnd := uint16(39 + int(sessionLength))
+	if !reflect.DeepEqual(clientVersion, serverData.SSLVersion) {
+		return fmt.Errorf("ssl version not matches, expected: %v, got: %v", serverData.SSLVersion, clientVersion)
+	}
+	radnomBytesTime := int64(binary.BigEndian.Uint32(contentData[6:10]))
+	currentTime := time.Now().UnixMilli()
+
+	if currentTime < radnomBytesTime {
+		return fmt.Errorf("time: %v should be less than is currently: %v", radnomBytesTime, currentTime)
+	}
+
+	sessionLength := int(contentData[38])
+	if sessionLength > 32 {
+		return fmt.Errorf("session length should be between 0-32")
+	}
+	sessionIndexEnd := uint16(39 + sessionLength)
 	sessionId := contentData[38:sessionIndexEnd]
 
 	cipherSuitesLength := binary.BigEndian.Uint16(contentData[sessionIndexEnd : sessionIndexEnd+2])
@@ -998,11 +1001,6 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 		return fmt.Errorf("\n got length:%v, expected :%v", len(compressionMethodList), int(compressionsLength))
 	}
 
-	// if !(len(sessionId) > 0 && sessionId[0] != 0) {
-	// 	fmt.Println("enter state??")
-	// 	fmt.Println(sessionId)
-	// 	fmt.Println(sessionId)
-	// 	fmt.Println(sessionId[0] != 0)
 	aa := string(sessionId)
 	if sessions[aa] != nil {
 		//TODO: that is not the best way, but it works, somehow but yeah..
@@ -1048,7 +1046,6 @@ func (serverData *ServerData) serverKeyExchange() error {
 	// Server key exchange its only used when there is no certificate or certificate is only used for signing (dss, signing-only rsa) or fortezza key exchange
 
 	if serverData.CipherDef.Spec.SignatureAlgorithm != s3_cipher.SignatureAlgorithmAnonymous && (serverData.CipherDef.Spec.KeyExchange != s3_cipher.KeyExchangeMethodDH && serverData.CipherDef.Spec.KeyExchange != s3_cipher.KeyExchangeMethodDHE) {
-		fmt.Println("nil?")
 		return nil
 	}
 
@@ -1071,22 +1068,24 @@ func (serverData *ServerData) serverKeyExchange() error {
 		return fmt.Errorf("unsupported Algorithm: %v", serverData.CipherDef.Spec.SignatureAlgorithm)
 	}
 
-	signedParams := serverData.CipherDef.SignParams(hash)
+	signedParams, err := serverData.CipherDef.SignData(hash)
+	signatureLength := helpers.Int32ToBigEndian(len(signedParams))
+
+	if err != nil {
+		return err
+	}
+
 	keyExchangeData := []byte{}
 	keyExchangeData = append(keyExchangeData, keyExchangeParams...)
-	keyExchangeData = append(keyExchangeData, signedParams...)
-
-	// Send key exchange message
-	// TODO: write better logic for it
-	// maybe use separate function
-	if len(keyExchangeData) < 1 {
-		return nil
+	if len(signedParams) > 0 {
+		keyExchangeData = append(keyExchangeData, signatureLength...)
+		keyExchangeData = append(keyExchangeData, signedParams...)
 	}
 
 	handshakeLengthh := len(keyExchangeData)
 	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(handshakeLengthh)
 	if err != nil {
-		fmt.Print("err while converting to big endina")
+		return fmt.Errorf("err while converting to big endina, err: %v", err)
 	}
 	recordLengthByte := helpers.Int32ToBigEndian(handshakeLengthh + 4)
 
@@ -1097,10 +1096,6 @@ func (serverData *ServerData) serverKeyExchange() error {
 	serverKeyExchange = append(serverKeyExchange, byte(TLSHandshakeMessageServerKeyExchange))
 	serverKeyExchange = append(serverKeyExchange, handshakeLengthByte...)
 	serverKeyExchange = append(serverKeyExchange, keyExchangeData...)
-
-	for _, v := range keyExchangeData {
-		fmt.Printf("%d, ", v)
-	}
 
 	err = serverData.BuffSendData(serverKeyExchange)
 
@@ -1121,12 +1116,10 @@ func (serverData *ServerData) serverHello() error {
 		fmt.Print("problem generating random bytes")
 	}
 
-	//TODO: pass actually list of ciphers and compression methods, write basic function to choose algorithm/compression method
-
 	cipherSuite := helpers.Int32ToBigEndian(int(serverData.CipherDef.CipherSuite))
 	compressionMethod := serverData.CipherDef.SelectCompressionMethod()
 	protocolVersion := serverData.SSLVersion
-	// TODO make session work, we can focus on it later, first implement another alogrithm
+	// TODO Generate uniq session id
 	sessionId := []byte{32, 5, 250, 177, 135, 39, 55, 14, 253, 178, 146, 17, 206, 127, 14, 100, 235, 198, 210, 127, 118, 158, 100, 83, 203, 68, 157, 27, 7, 240, 204, 216, 42}
 	aa := string(sessionId)
 	if aa != "\x00" {
@@ -1262,8 +1255,6 @@ func (serverData *ServerData) serverFinished() error {
 	}
 	serverFinished := []byte{byte(TLSContentTypeHandshake), 3, 0, 0, byte(len(encryptedMsg))}
 	serverFinished = append(serverFinished, encryptedMsg...)
-
-	// TODO: maybe return just bytes, and have another function to send it and there get iv, update  seq number etc...
 
 	serverData.wBuff = append(serverData.wBuff, serverFinished...)
 

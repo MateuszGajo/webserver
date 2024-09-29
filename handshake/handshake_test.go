@@ -1,6 +1,7 @@
 package handshake
 
 import (
+	"crypto/dsa"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/rsa"
@@ -27,8 +28,6 @@ import (
 	"webserver/helpers"
 )
 
-// TODO: maybe invoke openssl using cmd to verify code coretness?
-
 func readNMessage(n int, conn net.Conn) ([][]byte, error) {
 	messages := [][]byte{}
 	leftovers := []byte{}
@@ -43,13 +42,6 @@ func readNMessage(n int, conn net.Conn) ([][]byte, error) {
 
 		}
 
-		// TODO improve reading
-		// create a func read n message pass we want 3 message have readed, serverHello, serverKeyExchange, serverHelloDOne
-		fmt.Println("```````")
-		fmt.Println("```````")
-		fmt.Println("data")
-		fmt.Println(buf[:n])
-		fmt.Println("```````")
 		input := []byte{}
 		input = append(input, leftovers...)
 		input = append(input, buf[:n]...)
@@ -77,9 +69,8 @@ func readBigEndianN(data []byte) *big.Int {
 func (serverData *ServerData) generateClientHello() []byte {
 	clientRandomBytes := serverData.ClientRandom
 	if clientRandomBytes == nil {
-		clientRandomBytes = []byte{102, 213, 128, 42, 254, 171, 56, 146, 68, 181, 149, 44, 224, 124, 234, 207, 212, 237, 164, 74, 10, 169, 28, 204, 174, 157, 81, 130, 0, 0, 0, 0}
+		clientRandomBytes = []byte{102, 213, 128, 42, 254, 171, 56, 146, 68, 181, 149, 44, 224, 124, 234, 207, 212, 237, 164, 74, 10, 169, 28, 204, 174, 157, 81, 130, 0, 0, 0, 0, 4}
 	}
-	// TODO: fix becasue it was  passing even we pass mor ethan 32 bytes of random bytes
 	sslVersion := []byte{3, 0}
 
 	if serverData.SSLVersion != nil {
@@ -88,17 +79,37 @@ func (serverData *ServerData) generateClientHello() []byte {
 
 	clientHello := []byte{22}
 	clientHello = append(clientHello, sslVersion...)
-	// TODO change hardcoded length of record layer and content
-	clientHello = append(clientHello, []byte{0, 45, 1, 0, 0, 41}...)
-	clientHello = append(clientHello, sslVersion...)
-	clientHello = append(clientHello, clientRandomBytes...)
-	clientHello = append(clientHello, []byte{0, 0, 2}...)
+
 	cipher := []byte{0, 27}
 	if serverData.CipherDef.CipherSuite != 0 {
 		cipher = helpers.Int32ToBigEndian(int(serverData.CipherDef.CipherSuite))
 	}
+
+	cipherLength := helpers.Int32ToBigEndian(len(cipher))
+	sessionLength := []byte{0}
+	session := []byte{}
+	compressionMethodList := []byte{0}
+	compressionMethodListLength := []byte{byte(len(compressionMethodList))}
+	contentDataLength := len(sslVersion) + len(clientRandomBytes) + len(sessionLength) + len(session) + len(cipherLength) + len(cipher) + len(compressionMethodListLength) + len(compressionMethodList)
+	contentDataBigEndian, err := helpers.IntTo3BytesBigEndian(contentDataLength)
+	recordLength := helpers.Int32ToBigEndian(contentDataLength + 4)
+
+	if err != nil {
+		fmt.Printf("\n cant convert to big endian while creating client hello msg, err: %v", err)
+	}
+
+	clientHello = append(clientHello, recordLength...)
+	clientHello = append(clientHello, byte(TLSHandshakeMessageClientHello))
+	clientHello = append(clientHello, contentDataBigEndian...)
+	clientHello = append(clientHello, sslVersion...)
+	clientHello = append(clientHello, clientRandomBytes...)
+	clientHello = append(clientHello, sessionLength...)
+	clientHello = append(clientHello, session...)
+	clientHello = append(clientHello, cipherLength...)
 	clientHello = append(clientHello, cipher...)
-	clientHello = append(clientHello, []byte{1, 0}...)
+
+	clientHello = append(clientHello, compressionMethodListLength...)
+	clientHello = append(clientHello, compressionMethodList...)
 
 	return clientHello
 }
@@ -170,8 +181,6 @@ func (serverData *ServerData) verifyServerKeyExchange(data []byte) error {
 	handshakeType := data[5]
 	handshakeLength := uint32(data[6])<<16 | uint32(data[7])<<8 | uint32(data[8])
 
-	//0 1 3 0 1 2 0 1 2
-
 	if recType != byte(TLSContentTypeHandshake) {
 		return fmt.Errorf("should return tls handshake type")
 	}
@@ -195,22 +204,52 @@ func (serverData *ServerData) verifyServerKeyExchange(data []byte) error {
 		return fmt.Errorf("Expected handshake length: %v, but got: %v", expectedHandshakeLength, handshakeLength)
 	}
 	var err error
-
+	var keyExchangeBytesRead int
 	switch serverData.CipherDef.Spec.KeyExchange {
 	case cipher.KeyExchangeMethodDH:
-		err = serverData.verifyServerKeyExchangeDHParams(data[9:])
+		keyExchangeBytesRead, err = serverData.verifyServerKeyExchangeDHParams(data[9:])
 	case cipher.KeyExchangeMethodDHE:
-		err = serverData.verifyServerKeyExchangeDHParams(data[9:])
+		keyExchangeBytesRead, err = serverData.verifyServerKeyExchangeDHParams(data[9:])
 	default:
 		fmt.Println("unsported key exchange")
 		os.Exit(1)
 	}
+	if serverData.CipherDef.Spec.SignatureAlgorithm == cipher.SignatureAlgorithmAnonymous {
+		return err
+	}
+	signatureIndex := 9 + keyExchangeBytesRead
+	keyExchangeParams := data[9:signatureIndex]
+	signatureLength := int(binary.BigEndian.Uint16(data[signatureIndex : signatureIndex+2]))
+	signature := data[signatureIndex+2:]
+
+	if signatureLength != len(signature) {
+		return fmt.Errorf("Expected signature length of: %v, got: %v", signatureLength, len(signature))
+	}
+
+	hash := []byte{}
+
+	switch serverData.CipherDef.Spec.SignatureAlgorithm {
+	case cipher.SignatureAlgorithmAnonymous:
+	case cipher.SignatureAlgorithmRSA:
+		md5Hash := signatureHash(md5.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
+		shaHash := signatureHash(sha1.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
+		hash = append(hash, md5Hash...)
+		hash = append(hash, shaHash...)
+
+	case cipher.SignatureAlgorithmDSA:
+
+		shaHash := signatureHash(sha1.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
+		hash = append(hash, shaHash...)
+	default:
+		return fmt.Errorf("unsupported Algorithm: %v", serverData.CipherDef.Spec.SignatureAlgorithm)
+	}
+
+	err = serverData.CipherDef.VerifySignedData(hash, signature)
 
 	return err
-
 }
 
-func (serverData *ServerData) verifyServerKeyExchangeDHParams(data []byte) error {
+func (serverData *ServerData) verifyServerKeyExchangeDHParams(data []byte) (int, error) {
 	index := 0
 	dhParams := []*big.Int{}
 	for i := 0; i < 3; i++ {
@@ -223,7 +262,7 @@ func (serverData *ServerData) verifyServerKeyExchangeDHParams(data []byte) error
 	}
 
 	if index > len(data) {
-		return fmt.Errorf("Server key exchange is longer than it supposed to be, message: %v, len:%v, expected len: %v ", data, len(data), index)
+		return 0, fmt.Errorf("Server key exchange is longer than it supposed to be, message: %v, len:%v, expected len: %v ", data, len(data), index)
 	}
 
 	fmt.Println("servery key exchange")
@@ -244,7 +283,7 @@ func (serverData *ServerData) verifyServerKeyExchangeDHParams(data []byte) error
 		ClientPublic: serverPublic, // TODO to fix itin this case server public
 	}
 
-	return nil
+	return index, nil
 }
 
 func (serverData *ServerData) verifyServerHelloDone(data []byte) error {
@@ -699,13 +738,12 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 				KeyMaterial:         24,
 				IvSize:              8,
 				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
+				SignatureAlgorithm:  cipher.SignatureAlgorithmAnonymous,
 			},
 			CipherSuite: 0x001B,
 		},
 		ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
 	}
-	// TODO: fix becasue it was  passing even we pass mor ethan 32 bytes of random bytes
-
 	clientHello := serverData.generateClientHello()
 
 	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientHello[5:])
@@ -822,8 +860,6 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 		},
 		ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
 	}
-	// TODO: fix becasue it was  passing even we pass mor ethan 32 bytes of random bytes
-
 	clientHello := serverData.generateClientHello()
 
 	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientHello[5:])
@@ -857,13 +893,20 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("\n Problem with serverHello msg, err: %v", err)
 	}
 
-	_, err = serverData.verifyCertificate(certificate)
+	cert, err := serverData.verifyCertificate(certificate)
 
 	if err != nil {
 		t.Errorf("\n Problem with cserver ertificate msg, err: %v", err)
 	}
 
-	// TODO: we're missing singature verification
+	pubKey, ok := cert.PublicKey.(*rsa.PublicKey)
+
+	if !ok {
+		t.Error("\n can convert pubkey to rsa pub key")
+	}
+
+	serverData.CipherDef.Rsa.PublicKey = *pubKey
+
 	err = serverData.verifyServerKeyExchange(serverKeyExchange)
 
 	if err != nil {
@@ -952,8 +995,6 @@ func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
 	if err != nil {
 		t.Errorf("\n cant parse ceritifcate, err: %v", err)
 	}
-
-	// TODO: fix becasue it was  passing even we pass mor ethan 32 bytes of random bytes
 
 	clientHello := serverData.generateClientHello()
 
@@ -1090,8 +1131,6 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 		},
 		ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
 	}
-	// TODO: fix becasue it was  passing even we pass mor ethan 32 bytes of random bytes
-
 	clientHello := serverData.generateClientHello()
 
 	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientHello[5:])
@@ -1125,13 +1164,20 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("\n Problem with serverHello msg, err: %v", err)
 	}
 
-	_, err = serverData.verifyCertificate(certificate)
+	cert, err := serverData.verifyCertificate(certificate)
 
 	if err != nil {
 		t.Errorf("\n Problem with server certificate msg, err: %v", err)
 	}
 
-	// TODO: we're missing singature verification
+	pubKey, ok := cert.PublicKey.(*dsa.PublicKey)
+
+	if !ok {
+		t.Error("\n can convert pubkey to dsa pub key")
+	}
+
+	serverData.CipherDef.Dsa.PublicKey = *pubKey
+
 	err = serverData.verifyServerKeyExchange(serverKeyExchange)
 
 	if err != nil {
