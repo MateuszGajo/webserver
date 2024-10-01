@@ -47,7 +47,7 @@ var lcg8Bit = LCG8Bit{seed: 1}
 var lcg5Bit = LCG5Bit{seed: 1}
 
 func GenerateSession() []byte {
-	num := make([]byte, 32)
+	num := make([]byte, lcg5Bit.Next())
 
 	for i := range num {
 		num[i] = lcg8Bit.Next()
