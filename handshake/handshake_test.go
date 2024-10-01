@@ -28,7 +28,7 @@ import (
 	"webserver/helpers"
 )
 
-func readNMessage(n int, conn net.Conn) ([][]byte, error) {
+func (serverData *ServerData) readNMessage(n int, conn net.Conn) ([][]byte, error) {
 	messages := [][]byte{}
 	leftovers := []byte{}
 	for len(messages) < n {
@@ -45,7 +45,7 @@ func readNMessage(n int, conn net.Conn) ([][]byte, error) {
 		input := []byte{}
 		input = append(input, leftovers...)
 		input = append(input, buf[:n]...)
-		data, rest, err := Parser(input)
+		data, rest, err := serverData.Parser(input)
 		leftovers = rest
 		if err != nil {
 			fmt.Println("problem parsing")
@@ -140,7 +140,7 @@ func (serverData *ServerData) verifyServerHello(data []byte) error {
 		return fmt.Errorf("should return tls handshake type")
 	}
 
-	if sslVersion != SSL30Version {
+	if sslVersion != uint16(SSL30Version) {
 		return fmt.Errorf("version should be ssl 3.0")
 	}
 
@@ -185,7 +185,7 @@ func (serverData *ServerData) verifyServerKeyExchange(data []byte) error {
 		return fmt.Errorf("should return tls handshake type")
 	}
 
-	if sslVersion != SSL30Version {
+	if sslVersion != uint16(SSL30Version) {
 		return fmt.Errorf("version should be ssl 3.0")
 	}
 
@@ -297,7 +297,7 @@ func (serverData *ServerData) verifyServerHelloDone(data []byte) error {
 		return fmt.Errorf("should return tls handshake type")
 	}
 
-	if sslVersion != SSL30Version {
+	if sslVersion != uint16(SSL30Version) {
 		return fmt.Errorf("version should be ssl 3.0")
 	}
 
@@ -371,7 +371,7 @@ func (serverData *ServerData) verifyServerChangeCipher(data []byte) error {
 		return fmt.Errorf("should return tls change cipher type type")
 	}
 
-	if changeCipherContentSslVersion != SSL30Version {
+	if changeCipherContentSslVersion != uint16(SSL30Version) {
 		return fmt.Errorf("version should be ssl 3.0")
 	}
 
@@ -685,7 +685,7 @@ func (serverData *ServerData) verifyCertificate(data []byte) (*x509.Certificate,
 		return nil, fmt.Errorf("should return tls handshake type")
 	}
 
-	if sslVersion != SSL30Version {
+	if sslVersion != uint16(SSL30Version) {
 		return nil, fmt.Errorf("version should be ssl 3.0")
 	}
 
@@ -754,7 +754,7 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("problem writing client hello msg, err: %v", err)
 	}
 
-	data, err := readNMessage(3, conn)
+	data, err := serverData.readNMessage(3, conn)
 
 	if err != nil {
 		t.Errorf("problem reading server hello messages, expected to read 3 msgs, err: %v", err)
@@ -807,7 +807,7 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("Problem writing client finished messgae :%v", err)
 	}
 
-	data, err = readNMessage(2, conn)
+	data, err = serverData.readNMessage(2, conn)
 
 	if err != nil {
 		t.Errorf("Problem reading server finished and change cipher msgs, err: %v", err)
@@ -870,7 +870,7 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("Problem writing client hello, err: %v", err)
 	}
 
-	data, err := readNMessage(4, conn)
+	data, err := serverData.readNMessage(4, conn)
 
 	if err != nil {
 		t.Errorf("Problem reading server hello msgs, expected to read 4 messages, err: %v", err)
@@ -937,7 +937,7 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("Problem writing client finished messgae :%v", err)
 	}
 
-	data, err = readNMessage(2, conn)
+	data, err = serverData.readNMessage(2, conn)
 	if err != nil {
 		t.Errorf("Problem reading server chage cipher and server finished msgs, err: %v", err)
 	}
@@ -1006,7 +1006,7 @@ func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("Problem writing client hello, err: %v", err)
 	}
 
-	data, err := readNMessage(3, conn)
+	data, err := serverData.readNMessage(3, conn)
 
 	if err != nil {
 		t.Errorf("Problem reading server hello msgs, expected to read 4 messages, err: %v", err)
@@ -1079,7 +1079,7 @@ func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("Problem writing client finished messgae :%v", err)
 	}
 
-	data, err = readNMessage(2, conn)
+	data, err = serverData.readNMessage(2, conn)
 	if err != nil {
 		t.Errorf("Problem reading server chage cipher and server finished msgs, err: %v", err)
 	}
@@ -1141,7 +1141,7 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("Problem writing client hello, err: %v", err)
 	}
 
-	data, err := readNMessage(4, conn)
+	data, err := serverData.readNMessage(4, conn)
 
 	if err != nil {
 		t.Errorf("Problem reading server hello msgs, expected to read 4 messages, err: %v", err)
@@ -1208,7 +1208,7 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("Problem writing client finished messgae :%v", err)
 	}
 
-	data, err = readNMessage(2, conn)
+	data, err = serverData.readNMessage(2, conn)
 	if err != nil {
 		t.Errorf("Problem reading server chage cipher and server finished msgs, err: %v", err)
 	}

@@ -7,8 +7,29 @@ import (
 )
 
 func TestPartialMsg(t *testing.T) {
+
+	serverData := ServerData{
+		SSLVersion: []byte{3, 0},
+	}
 	msg := []byte{byte(TLSContentTypeHandshake), 3, 0}
-	output, partialOut, _ := Parser(msg)
+	output, partialOut, _ := serverData.Parser(msg)
+
+	if len(output) > 1 {
+		t.Errorf("Output should be empty")
+	}
+
+	if !reflect.DeepEqual(msg, partialOut) {
+		t.Errorf("Should return whole msg as partial, Expected: %v insted we got: %v", msg, partialOut)
+	}
+}
+
+func TestPartialLongMsg(t *testing.T) {
+
+	serverData := ServerData{
+		SSLVersion: []byte{3, 0},
+	}
+	msg := []byte{byte(TLSContentTypeHandshake), 3, 0, 0, 5, 1, 2}
+	output, partialOut, _ := serverData.Parser(msg)
 
 	if len(output) > 1 {
 		t.Errorf("Output should be empty")
@@ -20,11 +41,14 @@ func TestPartialMsg(t *testing.T) {
 }
 
 func TestFullAndPartialMsg(t *testing.T) {
+	serverData := ServerData{
+		SSLVersion: []byte{3, 0},
+	}
 	fullMsg := []byte{byte(TLSContentTypeHandshake), 3, 0, 0, 2, 1, 0}
 	partialMsg := []byte{byte(TLSContentTypeHandshake), 3, 0}
 	msg := append(fullMsg, partialMsg...)
 
-	output, partialOut, _ := Parser(msg)
+	output, partialOut, _ := serverData.Parser(msg)
 
 	if !reflect.DeepEqual(fullMsg, output[0]) {
 		t.Errorf("output should have fullMsg content at index 0. Expected: %v insted we got: %v", fullMsg, output[0])
@@ -36,9 +60,12 @@ func TestFullAndPartialMsg(t *testing.T) {
 }
 
 func TestErrorWrongContentType(t *testing.T) {
+	serverData := ServerData{
+		SSLVersion: []byte{3, 0},
+	}
 	msg := []byte{12, 3, 0, 0, 2, 1, 0}
 
-	_, _, err := Parser(msg)
+	_, _, err := serverData.Parser(msg)
 
 	fmt.Print(err)
 
@@ -55,11 +82,14 @@ func TestErrorWrongContentType(t *testing.T) {
 }
 
 func TestParseMultipleMsg(t *testing.T) {
+	serverData := ServerData{
+		SSLVersion: []byte{3, 0},
+	}
 	fullMsgOne := []byte{byte(TLSContentTypeHandshake), 3, 0, 0, 2, 1, 0}
 	fullMsgTwo := []byte{byte(TLSContentTypeHandshake), 3, 0, 0, 2, 4, 5}
 	msg := append(fullMsgOne, fullMsgTwo...)
 
-	output, _, _ := Parser(msg)
+	output, _, _ := serverData.Parser(msg)
 
 	if !reflect.DeepEqual(fullMsgOne, output[0]) {
 		t.Errorf("output should have fullMsg content at index 0. Expected: %v insted we got: %v", fullMsgOne, output[0])
@@ -69,8 +99,3 @@ func TestParseMultipleMsg(t *testing.T) {
 		t.Errorf("output should have fullMsg content at index 0. Expected: %v insted we got: %v", fullMsgTwo, output[0])
 	}
 }
-
-// TODO this condition was skipped
-// if len(clientHello) < 5+int(length) {
-// 	return output, clientHello, err
-// }

@@ -128,7 +128,7 @@ const (
 type SSLVersion uint16
 
 const (
-	SSL30Version = 0x0300
+	SSL30Version SSLVersion = 0x0300
 )
 
 type TLSAlertDescription byte
@@ -232,7 +232,7 @@ type ServerData struct {
 	conn              net.Conn
 	wBuff             []byte
 	cert              []byte
-	session           *string
+	session           []byte
 	reuseSession      bool
 }
 
@@ -439,7 +439,11 @@ func StartHttpServer(params *global.Params, server *global.Server) {
 	server.Wg.Done()
 	server.Conn = listener
 	for {
-		serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, SSLVersion: []byte{3, 0}, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: s3_cipher.CipherDef{}}
+		sslVersionBinary := make([]byte, 2)
+		binary.BigEndian.PutUint16(sslVersionBinary, uint16(SSL30Version))
+		fmt.Println("hello version")
+		fmt.Println(sslVersionBinary)
+		serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, SSLVersion: sslVersionBinary, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: s3_cipher.CipherDef{}}
 
 		if (params) != nil {
 
@@ -488,7 +492,7 @@ func HandleConnection(conn net.Conn, serverData *ServerData) {
 		}
 
 		input := append(bufInit, clientHello...)
-		msgs, partial, err := Parser(input)
+		msgs, partial, err := serverData.Parser(input)
 		bufInit = partial
 
 		if err != nil {
@@ -934,7 +938,7 @@ func (serverData *ServerData) handleHandshake(contentData []byte) {
 			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
 		}
 
-		sessions[*serverData.session] = serverData
+		sessions[string(serverData.session)] = serverData
 
 	}
 }
@@ -989,7 +993,7 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 		return fmt.Errorf("session length should be between 0-32")
 	}
 	sessionIndexEnd := uint16(39 + sessionLength)
-	sessionId := contentData[38:sessionIndexEnd]
+	sessionId := contentData[39:sessionIndexEnd]
 
 	cipherSuitesLength := binary.BigEndian.Uint16(contentData[sessionIndexEnd : sessionIndexEnd+2])
 
@@ -1119,14 +1123,20 @@ func (serverData *ServerData) serverHello() error {
 	cipherSuite := helpers.Int32ToBigEndian(int(serverData.CipherDef.CipherSuite))
 	compressionMethod := serverData.CipherDef.SelectCompressionMethod()
 	protocolVersion := serverData.SSLVersion
-	// TODO Generate uniq session id
-	sessionId := []byte{32, 5, 250, 177, 135, 39, 55, 14, 253, 178, 146, 17, 206, 127, 14, 100, 235, 198, 210, 127, 118, 158, 100, 83, 203, 68, 157, 27, 7, 240, 204, 216, 42}
-	aa := string(sessionId)
-	if aa != "\x00" {
-		serverData.session = &aa
+
+	sessionId := []byte{}
+	sessionLength := []byte{0}
+
+	if len(serverData.session) != 0 {
+		sessionId = serverData.session
+		sessionLength = []byte{byte(len(sessionId))}
+	} else {
+		sessionId = GenerateSession()
+		sessionLength = []byte{byte(len(sessionId))}
+		serverData.session = sessionId
 	}
 	//                  time				random bytes	 session id cypher suit	  compression methodd
-	handshakeLength := len(unitTimeBytes) + len(randomBytes) + len(sessionId) + len(cipherSuite) + len(compressionMethod) + len(protocolVersion)
+	handshakeLength := len(unitTimeBytes) + len(randomBytes) + len(sessionLength) + len(sessionId) + len(cipherSuite) + len(compressionMethod) + len(protocolVersion)
 	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(handshakeLength)
 
 	if err != nil {
@@ -1145,13 +1155,12 @@ func (serverData *ServerData) serverHello() error {
 	// serverHello = append(serverHello, randomBytes...)
 	// TODO: lets leave it for now as it easier to debug, remove later
 	serverHello = append(serverHello, []byte{102, 221, 107, 191, 80, 40, 191, 66, 96, 85, 167, 65, 108, 253, 149, 220, 154, 111, 218, 246, 151, 219, 148, 153, 252, 180, 122, 211, 0, 0, 0, 0}...)
+	serverHello = append(serverHello, sessionLength...)
 	serverHello = append(serverHello, sessionId...)
 	serverHello = append(serverHello, cipherSuite...)
 	serverHello = append(serverHello, compressionMethod...)
 
-	// 19
 	serverData.ServerRandom = []byte{102, 221, 107, 191, 80, 40, 191, 66, 96, 85, 167, 65, 108, 253, 149, 220, 154, 111, 218, 246, 151, 219, 148, 153, 252, 180, 122, 211, 0, 0, 0, 0}
-	//13
 
 	err = serverData.BuffSendData(serverHello)
 
@@ -1280,12 +1289,8 @@ func (serverData *ServerData) handleHandshakeClientFinished(contentData []byte) 
 	inputHash := contentData[4:]
 
 	if !reflect.DeepEqual(clientHash, inputHash[:hashLen]) {
-		// TODO Need to throw some error/alert\
-		fmt.Println("message are different")
-		fmt.Println(contentData[:hashLen])
-		fmt.Println(inputHash[:hashLen])
-		os.Exit(1)
-
+		fmt.Printf("message are different, expected: %v, got: %v", inputHash[:hashLen], clientHash)
+		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionBadRecordMac)
 	}
 
 	return [][]byte{}
