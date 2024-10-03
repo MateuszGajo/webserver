@@ -72,9 +72,6 @@ func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) []byte {
 			os.Exit(1)
 		}
 		preMasterSecret = decrypted
-	case KeyExchangeMethodDHE:
-		fmt.Print("Key exchang dhe not implemented")
-		os.Exit(1)
 	default:
 		fmt.Print("Key exchang method not implmeneted yet")
 		os.Exit(1)
@@ -109,8 +106,6 @@ func (cipherDef *CipherDef) GenerateServerKeyExchange() []byte {
 	case KeyExchangeMethodDH:
 		resp = cipherDef.DhParams.GenerateDhParams()
 	case KeyExchangeMethodRSA:
-		return []byte{}
-	case KeyExchangeMethodDHE:
 		return []byte{}
 	default:
 		fmt.Printf("Key exchange parameters not implemented for: %v", cipherDef.Spec.KeyExchange)
@@ -254,7 +249,7 @@ var serverCipherPreferences = []TLSCipherSuite{
 	TLS_CIPHER_SUITE_SSL_RSA_WITH_NULL_MD5,
 }
 
-func (cipherDef *CipherDef) SelectCipherSuite(cipherSuites []byte) {
+func (cipherDef *CipherDef) SelectCipherSuite(cipherSuites []byte) error {
 
 	cipherList := []uint16{}
 
@@ -269,6 +264,7 @@ func (cipherDef *CipherDef) SelectCipherSuite(cipherSuites []byte) {
 			for _, clientCipher := range cipherList {
 				if serverCipher == TLSCipherSuite(clientCipher) {
 					cipherDef.CipherSuite = clientCipher
+					return nil
 				}
 			}
 		}
@@ -277,26 +273,37 @@ func (cipherDef *CipherDef) SelectCipherSuite(cipherSuites []byte) {
 			for _, serverCipher := range serverCipherPreferences {
 				if clientCipher == uint16(serverCipher) {
 					cipherDef.CipherSuite = clientCipher
+					return nil
 				}
 			}
 		}
 	}
 
-	// TODO: low prio, consider changing this
-	cipherDef.GetCipherSpecInfo()
+	return fmt.Errorf("server doesnt have any of provided suites :%v", cipherSuites)
 
 }
 
-func (cipherDef *CipherDef) SelectCompressionMethod() []byte {
+var serverCompressionMethods = []CompressionMethod{
+	CompressionAlgorithmNull,
+	CompressionAlgorithmDeflate,
+}
 
-	// TODO implement this
+func (cipherDef *CipherDef) SelectCompressionMethod(compressionMethods []byte) error {
 
-	return []byte{0}
+	for _, clientMethod := range compressionMethods {
+		for _, serverMethod := range serverCompressionMethods {
+			if clientMethod == byte(serverMethod) {
+				cipherDef.Spec.CompressionMethod = serverMethod
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("server doesn't have any provided compression method: %v", compressionMethods)
 
 }
 
 func (cipherDef *CipherDef) GetCipherSpecInfo() {
-	//TODO  fill all data
 	switch TLSCipherSuite(cipherDef.CipherSuite) {
 	case TLS_CIPHER_SUITE_SSL_NULL_WITH_NULL_NULL:
 	case TLS_CIPHER_SUITE_SSL_RSA_WITH_NULL_MD5:
@@ -329,8 +336,7 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		cipherDef.Spec.KeyMaterial = 24
 		cipherDef.Spec.IvSize = 8
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
-		// TODO change this to DHE
-		// TODO roate keys when using DHE
+		cipherDef.Spec.KeyExchangeRotation = true
 		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
 		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmDSA
@@ -341,8 +347,7 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		cipherDef.Spec.KeyMaterial = 24
 		cipherDef.Spec.IvSize = 8
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
-		// TODO change this to DHE
-		// TODO roate keys when using DHE
+		cipherDef.Spec.KeyExchangeRotation = true
 		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
 		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA

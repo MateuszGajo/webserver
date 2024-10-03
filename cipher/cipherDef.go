@@ -29,7 +29,6 @@ type KeyExchangeMethod string
 
 const (
 	KeyExchangeMethodDH  KeyExchangeMethod = "dh"
-	KeyExchangeMethodDHE KeyExchangeMethod = "dhe"
 	KeyExchangeMethodRSA KeyExchangeMethod = "rsa"
 )
 
@@ -53,13 +52,16 @@ const (
 )
 
 type CipherSpec struct {
-	HashSize            int
-	KeyMaterial         int
-	IvSize              int
-	HashAlgorithm       HashAlgorithm
-	KeyExchange         KeyExchangeMethod
+	HashSize      int
+	KeyMaterial   int
+	IvSize        int
+	HashAlgorithm HashAlgorithm
+	KeyExchange   KeyExchangeMethod
+	// Use this paramter when using DHE key exchange, as dh has almost the same implementation to dhe
+	KeyExchangeRotation bool
 	EncryptionAlgorithm EncryptionAlgorithm
 	SignatureAlgorithm  SignatureAlgorithm
+	CompressionMethod   CompressionMethod
 }
 
 type CipherDef struct {
@@ -90,6 +92,16 @@ type DhParams struct {
 	Public       *big.Int
 	ClientPublic *big.Int
 }
+
+type CompressionMethod byte
+
+const (
+	CompressionAlgorithmNull    CompressionMethod = 0
+	CompressionAlgorithmDeflate CompressionMethod = 1
+	// I found it in seperate rfc, rfcs related to ssl 3.0 tls 1.0 etc only contain null as compression algorithm, nothing more. In tls 1.3 field is depracted
+	// Deflate has vunluberity problem, here is how it works https://zlib.net/feldspar.html
+	// Defalte uses loseless compression, attacker can add some data (singular letters i guess) to user's request and observe if length is changing, by doing that it can discover with letter is ocucring and which not.
+)
 
 const (
 	TLS_CIPHER_SUITE_SSL_NULL_WITH_NULL_NULL            TLSCipherSuite = 0x0000

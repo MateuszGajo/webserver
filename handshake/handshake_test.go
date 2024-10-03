@@ -208,8 +208,6 @@ func (serverData *ServerData) verifyServerKeyExchange(data []byte) error {
 	switch serverData.CipherDef.Spec.KeyExchange {
 	case cipher.KeyExchangeMethodDH:
 		keyExchangeBytesRead, err = serverData.verifyServerKeyExchangeDHParams(data[9:])
-	case cipher.KeyExchangeMethodDHE:
-		keyExchangeBytesRead, err = serverData.verifyServerKeyExchangeDHParams(data[9:])
 	default:
 		fmt.Println("unsported key exchange")
 		os.Exit(1)
