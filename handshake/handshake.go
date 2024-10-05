@@ -615,9 +615,14 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) {
 	dataContent := clientData[5:]
 	if serverData.IsClientEncrypted {
 		decryptedClientData := serverData.CipherDef.DecryptMessage(clientData[5:], serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
-		serverData.verifyMac(contentType, decryptedClientData)
+		dataWithoutMac, err := serverData.verifyMac(contentType, decryptedClientData)
 
-		dataContent = decryptedClientData
+		if err != nil {
+			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionBadRecordMac)
+			return
+		}
+
+		dataContent = dataWithoutMac
 
 	}
 
@@ -631,6 +636,8 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) {
 		handleAlert(dataContent, conn)
 	} else if contentType == byte(TLSContentTypeChangeCipherSpec) {
 		serverData.handleHandshakeChangeCipherSpec(dataContent)
+	} else if contentType == byte(TLSContentTypeApplicationData) {
+		HttpHandler(dataContent)
 	} else {
 		fmt.Println("Unknown record layer type:" + string(contentType))
 		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
@@ -638,25 +645,44 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) {
 
 }
 
-func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) {
-	var clientDataWithHeader int32
+func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) ([]byte, error) {
+	var clientDataWithHeader int
+	var macSize int
+	switch serverData.CipherDef.Spec.HashAlgorithm {
+	case s3_cipher.HashAlgorithmMD5:
+		macSize = md5.New().Size()
+	case s3_cipher.HashAlgorithmSHA:
+		macSize = sha1.New().Size()
+	default:
+		panic("wrong algorithm used can't use: " + serverData.CipherDef.Spec.HashAlgorithm)
+	}
 	if contentType == 22 {
-		clientDataLength := int32(contentData[1])<<16 | int32(contentData[2])<<8 | int32(contentData[3])
+		clientDataLength := int(contentData[1])<<16 | int(contentData[2])<<8 | int(contentData[3])
 		clientDataWithHeader = 4 + clientDataLength
 	} else if contentType == 21 {
 		clientDataWithHeader = 2
 		// return
+	} else if contentType == 23 {
+
+		clientDataWithHeader = 0
+	}
+	if clientDataWithHeader+macSize != len(contentData) {
+		return nil, fmt.Errorf("Data passed has wrong length, expected data + mac to be of length: %v, but is:%v", clientDataWithHeader+macSize, len(contentData))
 	}
 
-	dataSent := contentData[:clientDataWithHeader]
+	fmt.Println("seqNum")
+	fmt.Println(serverData.ClientSeqNum)
+
+	macSent := contentData[len(contentData)-macSize:]
+
+	dataSent := contentData[:len(contentData)-macSize]
+	fmt.Println("data")
+	fmt.Println(dataSent)
 
 	streamCipher := serverData.generateStreamCipher([]byte{byte(contentType)}, dataSent, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacClient)
 
-	if !reflect.DeepEqual(streamCipher, contentData[clientDataWithHeader:]) {
-		fmt.Printf("\n macs are diffrent, expected: %v, got: %v", streamCipher, contentData[clientDataWithHeader:])
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionBadRecordMac)
-
-		return
+	if !reflect.DeepEqual(streamCipher, macSent) {
+		return nil, fmt.Errorf("\n macs are diffrent, expected: %v, got: %v", streamCipher, contentData[clientDataWithHeader:])
 	}
 
 	for i := 7; i >= 0; i-- {
@@ -665,6 +691,8 @@ func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) {
 			break
 		}
 	}
+
+	return dataSent, nil
 }
 
 func handleAlert(contentData []byte, conn net.Conn) {
