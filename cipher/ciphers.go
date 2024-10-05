@@ -18,13 +18,13 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []
 
 	switch TLSCipherSuite(cipherDef.CipherSuite) {
 	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
-		return DecryptDesMessage(encryptedData, writeKey, iv)
+		return Decrypt3DesMessage(encryptedData, writeKey, iv)
 	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
-		return DecryptDesMessage(encryptedData, writeKey, iv)
+		return Decrypt3DesMessage(encryptedData, writeKey, iv)
 	case TLS_CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA:
-		return DecryptDesMessage(encryptedData, writeKey, iv)
+		return Decrypt3DesMessage(encryptedData, writeKey, iv)
 	case TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA:
-		return DecryptDesMessage(encryptedData, writeKey, iv)
+		return Decrypt3DesMessage(encryptedData, writeKey, iv)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
 		os.Exit(1)
@@ -38,13 +38,13 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) []b
 	var encryptedMsg []byte
 	switch TLSCipherSuite(cipherDef.CipherSuite) {
 	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
-		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
+		encryptedMsg = Encrypt3DesMessage(data, writeKey, iv)
 	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
-		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
+		encryptedMsg = Encrypt3DesMessage(data, writeKey, iv)
 	case TLS_CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA:
-		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
+		encryptedMsg = Encrypt3DesMessage(data, writeKey, iv)
 	case TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA:
-		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
+		encryptedMsg = Encrypt3DesMessage(data, writeKey, iv)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
 		os.Exit(1)

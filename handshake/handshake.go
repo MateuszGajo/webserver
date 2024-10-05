@@ -639,7 +639,7 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) {
 	} else if contentType == byte(TLSContentTypeApplicationData) {
 		HttpHandler(dataContent)
 	} else {
-		fmt.Println("Unknown record layer type:" + string(contentType))
+		fmt.Println("\n Unknown record layer type:" + string(contentType))
 		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
 	}
 

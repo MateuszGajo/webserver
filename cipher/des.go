@@ -10,7 +10,7 @@ import (
 
 var PADDING_LENGTH = 8
 
-func Decrypt3DESCBC(key, iv, ciphertext []byte) ([]byte, error) {
+func Decrypt3Des(key, iv, ciphertext []byte) ([]byte, error) {
 	block, err := des.NewTripleDESCipher(key)
 
 	if err != nil {
@@ -28,7 +28,7 @@ func Decrypt3DESCBC(key, iv, ciphertext []byte) ([]byte, error) {
 	return decrypted, nil
 }
 
-func Encrypt3DESCBC(key, iv, ciphertext []byte) ([]byte, error) {
+func Encrypt3Des(key, iv, ciphertext []byte) ([]byte, error) {
 	block, err := des.NewTripleDESCipher(key)
 
 	if err != nil {
@@ -65,9 +65,9 @@ func removeCustomPadding(src []byte, blockSize int) ([]byte, error) {
 	return src[:len(src)-paddingLen], nil
 }
 
-func DecryptDesMessage(encryptedData, writeKey, iv []byte) []byte {
+func Decrypt3DesMessage(encryptedData, writeKey, iv []byte) []byte {
 	encryptedMessage := encryptedData
-	decodedMsg, err := Decrypt3DESCBC(writeKey, iv, encryptedMessage)
+	decodedMsg, err := Decrypt3Des(writeKey, iv, encryptedMessage)
 	if err != nil {
 		fmt.Println("problem decrypting data")
 		fmt.Println(err)
@@ -91,12 +91,13 @@ func roundUpToMultiple(length, multiple int) int {
 	return ((length / multiple) + 1) * multiple
 }
 
-func EncryptDesMessage(data, writeKey, iv []byte) []byte {
-	padLength := roundUpToMultiple(len(data), PADDING_LENGTH)
+func Encrypt3DesMessage(data, writeKey, iv []byte) []byte {
+	// PADDING_LENGTH = BLOCK SIZE IN TRIPED DES IS 8 BYTES (64-bits)
+	padLength := roundUpToMultiple(len(data), des.BlockSize)
 
 	dataPadded := addCustomPadding(data, padLength)
 
-	encryptedMsg, err := Encrypt3DESCBC(writeKey, iv, dataPadded)
+	encryptedMsg, err := Encrypt3Des(writeKey, iv, dataPadded)
 	if err != nil {
 		fmt.Println("problem decrypting data")
 		fmt.Println(err)

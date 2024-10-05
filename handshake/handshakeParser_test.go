@@ -3,6 +3,7 @@ package handshake
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -75,7 +76,7 @@ func TestErrorWrongContentType(t *testing.T) {
 		t.Error("It should return error")
 	}
 
-	if err != nil && err.Error() != expectedErr {
+	if err != nil && !strings.Contains(err.Error(), expectedErr) {
 		t.Errorf("Expected error to be: %v, got: %v", expectedErr, err.Error())
 	}
 

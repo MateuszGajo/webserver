@@ -437,14 +437,7 @@ func (serverData *ServerData) generateClientFinishedMsg() []byte {
 
 	msg = append(msg, streamCipher...)
 
-	fmt.Println("encrypt with")
-	fmt.Println("encrypt with")
-	fmt.Println("encrypt with")
-	fmt.Println("encrypt with")
-	fmt.Println(serverData.CipherDef.Keys.WriteKeyClient)
-	fmt.Println(serverData.CipherDef.Keys.IVClient)
-
-	encrypted := cipher.EncryptDesMessage(msg, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+	encrypted := cipher.Encrypt3DesMessage(msg, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
 
 	finishedMsg := []byte{22, 3, 0, 0, 64}
 	finishedMsg = append(finishedMsg, encrypted...)
@@ -824,6 +817,25 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("Problem with verify server finished %v", err)
+	}
+
+	// For now all we test if we can pass application data
+	// TODO: Comeback later as we implement newer tls, it will be easier to test it
+
+	applicationDataContent := []byte("string")
+	streamCipher := serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, applicationDataContent, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacServer)
+	applicationDataContent = append(applicationDataContent, streamCipher...)
+
+	applicationDataEncrypted := cipher.Encrypt3DesMessage(applicationDataContent, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+
+	applicationData := []byte{23, 3, 0}
+	applicationDataEncryptedLength := helpers.Int32ToBigEndian(len(applicationDataEncrypted))
+	applicationData = append(applicationData, applicationDataEncryptedLength...)
+	applicationData = append(applicationData, applicationDataEncrypted...)
+	_, err = conn.Write(applicationData)
+
+	if err != nil {
+		t.Errorf("cant send application data msg, err: %v", err)
 	}
 }
 
