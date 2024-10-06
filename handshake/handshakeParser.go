@@ -16,7 +16,7 @@ func (serverData *ServerData) Parser(clientHello []byte) (output [][]byte, rest 
 
 		contentType := clientHello[0]
 		if contentType < byte(TLSContentTypeChangeCipherSpec) || contentType > byte(TLSContentTypeApplicationData) {
-			return output, rest, fmt.Errorf("invalid content type")
+			return output, rest, fmt.Errorf("invalid content type, content type: %v", contentType)
 		}
 
 		version := binary.BigEndian.Uint16(clientHello[1:3])

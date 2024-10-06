@@ -52,16 +52,18 @@ const (
 )
 
 type CipherSpec struct {
-	HashSize      int
-	KeyMaterial   int
-	IvSize        int
-	HashAlgorithm HashAlgorithm
-	KeyExchange   KeyExchangeMethod
+	HashSize          int
+	KeyMaterial       int
+	ExportKeyMaterial int
+	IvSize            int
+	HashAlgorithm     HashAlgorithm
+	KeyExchange       KeyExchangeMethod
 	// Use this paramter when using DHE key exchange, as dh has almost the same implementation to dhe
 	KeyExchangeRotation bool
 	EncryptionAlgorithm EncryptionAlgorithm
 	SignatureAlgorithm  SignatureAlgorithm
 	CompressionMethod   CompressionMethod
+	IsExportable        bool
 }
 
 type CipherDef struct {
@@ -144,3 +146,45 @@ const (
 	// fortezza tokens used in the highly secure env such as goverment
 	//
 )
+
+// Export Ciphers: These ciphers were created to comply with U.S. regulations. As a result, export ciphers used reduced-strength encryption (e.g., 40-bit DES) and short (512-bit) RSA keys.
+
+var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
+	TLS_CIPHER_SUITE_SSL_NULL_WITH_NULL_NULL:            "NULL_WITH_NULL_NULL",
+	TLS_CIPHER_SUITE_SSL_RSA_WITH_NULL_MD5:              "RSA_WITH_NULL_MD5",
+	TLS_CIPHER_SUITE_SSL_RSA_WITH_NULL_SHA:              "RSA_WITH_NULL_SHA",
+	TLS_CIPHER_SUITE_SSL_RSA_EXPORT_WITH_RC4_40_MD5:     "RSA_EXPORT_WITH_RC4_40_MD5",
+	TLS_CIPHER_SUITE_SSL_RSA_WITH_RC4_128_MD5:           "RSA_WITH_RC4_128_MD5",
+	TLS_CIPHER_SUITE_SSL_RSA_WITH_RC4_128_SHA:           "RSA_WITH_RC4_128_SHA",
+	TLS_CIPHER_SUITE_SSL_RSA_EXPORT_WITH_RC2_CBC_40_MD5: "RSA_EXPORT_WITH_RC2_CBC_40_MD5",
+	TLS_CIPHER_SUITE_SSL_RSA_WITH_IDEA_CBC_SHA:          "RSA_WITH_IDEA_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_RSA_EXPORT_WITH_DES40_CBC_SHA:  "RSA_EXPORT_WITH_DES40_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_RSA_WITH_DES_CBC_SHA:           "RSA_WITH_DES_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA:      "RSA_WITH_3DES_EDE_CBC_SHA",
+	//Following cipher suite definition requires that server provide an rsa certificat ethat can be used for key exchange.
+	TLS_CIPHER_SUITE_SSL_DH_DSS_EXPORT_WITH_DES40_CBC_SHA:  "DH_DSS_EXPORT_WITH_DES40_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DH_DSS_WITH_DES_CBC_SHA:           "DH_DSS_WITH_DES_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DH_DSS_WITH_3DES_EDE_CBC_SHA:      "DH_DSS_WITH_3DES_EDE_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DH_RSA_EXPORT_WITH_DES40_CBC_SHA:  "DH_RSA_EXPORT_WITH_DES40_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DH_RSA_WITH_DES_CBC_SHA:           "DH_RSA_WITH_DES_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DH_RSA_WITH_3DES_EDE_CBC_SHA:      "DH_RSA_WITH_3DES_EDE_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DHE_DSS_EXPORT_WITH_DES40_CBC_SHA: "DHE_DSS_EXPORT_WITH_DES40_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_DES_CBC_SHA:          "DHE_DSS_WITH_DES_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA:     "DHE_DSS_WITH_3DES_EDE_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA: "DHE_RSA_EXPORT_WITH_DES40_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SHA:          "DHE_RSA_WITH_DES_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:     "DHE_RSA_WITH_3DES_EDE_CBC_SHA",
+	// Folowing cipher suited are used for server-authenticated (optianlly client) diffie-hellman. Dh denotes cipher suited in which the server-s certificate contains dh paramters signed by the  certificate authority.
+	// dhe denothes ephemral diffie-hellman where dh paramters are signed by dss or rsa cerificate, which has been signed by ca. The sigin algorithm used in specified after the dh or dhepparamter.
+	// In all case  the clie must have the same type of cerificate, and must use the dh paramters chosen by the server
+
+	TLS_CIPHER_SUITE_SSL_DH_anon_EXPORT_WITH_RC4_40_MD5:    "DH_anon_EXPORT_WITH_RC4_40_MD5",
+	TLS_CIPHER_SUITE_SSL_DH_anon_WITH_RC4_128_MD5:          "DH_anon_WITH_RC4_128_MD5",
+	TLS_CIPHER_SUITE_SSL_DH_anon_EXPORT_WITH_DES40_CBC_SHA: "DH_anon_EXPORT_WITH_DES40_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DH_anon_WITH_DES_CBC_SHA:          "DH_anon_WITH_DES_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:     "DH_anon_WITH_3DES_EDE_CBC_SHA",
+	// The following cipher suited are used for completely anonymous diffie hellman in which neither party is authenticated. Note thi is extremly vuluberable to man in the middle attackers, so its strongly discouraged to use it.
+	TLS_CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_NULL_SHA:         "FORTEZZA_KEA_WITH_NULL_SHA",
+	TLS_CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA: "FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA",
+	TLS_CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_RC4_128_SHA:      "FORTEZZA_KEA_WITH_RC4_128_SHA",
+}

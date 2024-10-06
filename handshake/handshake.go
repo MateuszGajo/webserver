@@ -618,6 +618,7 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) {
 		dataWithoutMac, err := serverData.verifyMac(contentType, decryptedClientData)
 
 		if err != nil {
+			fmt.Printf("\n eror with verify mac, err: %v", err)
 			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionBadRecordMac)
 			return
 		}
@@ -646,7 +647,6 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) {
 }
 
 func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) ([]byte, error) {
-	var clientDataWithHeader int
 	var macSize int
 	switch serverData.CipherDef.Spec.HashAlgorithm {
 	case s3_cipher.HashAlgorithmMD5:
@@ -656,33 +656,15 @@ func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) ([
 	default:
 		panic("wrong algorithm used can't use: " + serverData.CipherDef.Spec.HashAlgorithm)
 	}
-	if contentType == 22 {
-		clientDataLength := int(contentData[1])<<16 | int(contentData[2])<<8 | int(contentData[3])
-		clientDataWithHeader = 4 + clientDataLength
-	} else if contentType == 21 {
-		clientDataWithHeader = 2
-		// return
-	} else if contentType == 23 {
-
-		clientDataWithHeader = 0
-	}
-	if clientDataWithHeader+macSize != len(contentData) {
-		return nil, fmt.Errorf("Data passed has wrong length, expected data + mac to be of length: %v, but is:%v", clientDataWithHeader+macSize, len(contentData))
-	}
-
-	fmt.Println("seqNum")
-	fmt.Println(serverData.ClientSeqNum)
 
 	macSent := contentData[len(contentData)-macSize:]
 
 	dataSent := contentData[:len(contentData)-macSize]
-	fmt.Println("data")
-	fmt.Println(dataSent)
 
 	streamCipher := serverData.generateStreamCipher([]byte{byte(contentType)}, dataSent, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacClient)
 
 	if !reflect.DeepEqual(streamCipher, macSent) {
-		return nil, fmt.Errorf("\n macs are diffrent, expected: %v, got: %v", streamCipher, contentData[clientDataWithHeader:])
+		return nil, fmt.Errorf("\n macs are diffrent, expected: %v, got: %v", streamCipher, macSent)
 	}
 
 	for i := 7; i >= 0; i-- {
@@ -700,10 +682,10 @@ func handleAlert(contentData []byte, conn net.Conn) {
 	// minorVersion := clientHello[2]
 	// length := clientHello[3:4]
 	alertLevel := TlSAlertLevel(contentData[0])
+	closeConn := false
 
 	if alertLevel == TLSAlertLevelfatal {
-		conn.Close()
-		return
+		closeConn = true
 	}
 
 	alertDescription := TLSAlertDescription(contentData[1])
@@ -712,7 +694,7 @@ func handleAlert(contentData []byte, conn net.Conn) {
 	case TLSAlertDescriptionCloseNotify:
 		// The connection is closing or has been closed gracefully, no action needed
 		fmt.Println("Closing connection")
-		conn.Close()
+		closeConn = true
 	case TLSAlertDescriptionUnexpectedMessage:
 		// Do Retry, bad message recive, long term problem can indicate protocol mismatch(client expecting e.g tls 1.2 and server sending 1.3), incorrect squence or error in
 		fmt.Print("Unexpected message, Retry connectin again, if problem persist, check configuration")
@@ -779,6 +761,10 @@ func handleAlert(contentData []byte, conn net.Conn) {
 		fmt.Printf("Unregonized alert occured: %v", alertDescription)
 	}
 
+	if closeConn {
+		conn.Close()
+		return
+	}
 }
 
 func (serverData *ServerData) loadCertificate() error {
@@ -829,6 +815,9 @@ func (serverData *ServerData) sendData(data []byte) (n int, err error) {
 			}
 		}
 	}
+
+	fmt.Println("what we are sedning")
+	fmt.Println(data)
 
 	n, err = serverData.conn.Write(data)
 	if err != nil {
@@ -1116,6 +1105,7 @@ func (serverData *ServerData) serverHello() error {
 		sessionLength = []byte{byte(len(session))}
 	} else {
 		session = GenerateSession()
+
 		sessionLength = []byte{byte(len(session))}
 		serverData.session = session
 	}
@@ -1178,6 +1168,25 @@ func (serverData *ServerData) handleHandshakeClientKeyExchange(contentData []byt
 	serverData.PreMasterSecret = preMasterSecret
 }
 
+func (serverData *ServerData) calculateExportableFinalWriteKey(key, seed []byte) []byte {
+	hash := md5.New()
+
+	hash.Write(key)
+	hash.Write(seed)
+
+	return hash.Sum(nil)
+
+}
+
+func (serverData *ServerData) calculateExportableFinalIv(seed []byte) []byte {
+	hash := md5.New()
+
+	hash.Write(seed)
+
+	return hash.Sum(nil)
+
+}
+
 func (serverData *ServerData) calculateKeyBlock(masterKey []byte) {
 	keyBlockSeed := []byte{}
 	keyBlockSeed = append(keyBlockSeed, serverData.ServerRandom...)
@@ -1197,6 +1206,36 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) {
 		IVClient:       keyBlock[writeKeyEndIndex : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize],
 		IVServer:       keyBlock[writeKeyEndIndex+serverData.CipherDef.Spec.IvSize : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize*2],
 	}
+
+	fmt.Println("cipher key def11")
+	fmt.Println("cipher key def")
+	fmt.Println("cipher key def")
+	fmt.Printf("%+v", cipherDefKeys)
+
+	if serverData.CipherDef.Spec.IsExportable {
+		clientSeed := []byte{}
+		clientSeed = append(clientSeed, serverData.ClientRandom...)
+		clientSeed = append(clientSeed, serverData.ServerRandom...)
+		clientWriteKey := serverData.calculateExportableFinalWriteKey(cipherDefKeys.WriteKeyClient, clientSeed)
+
+		serverSeed := []byte{}
+		serverSeed = append(serverSeed, serverData.ServerRandom...)
+		serverSeed = append(serverSeed, serverData.ClientRandom...)
+		serverWriteKey := serverData.calculateExportableFinalWriteKey(cipherDefKeys.WriteKeyServer, serverSeed)
+
+		cipherDefKeys.WriteKeyClient = clientWriteKey[:serverData.CipherDef.Spec.ExportKeyMaterial]
+		cipherDefKeys.WriteKeyServer = serverWriteKey[:serverData.CipherDef.Spec.ExportKeyMaterial]
+
+		IVClient := serverData.calculateExportableFinalIv(clientSeed)
+		IVServer := serverData.calculateExportableFinalIv(serverSeed)
+
+		cipherDefKeys.IVClient = IVClient[:serverData.CipherDef.Spec.IvSize]
+		cipherDefKeys.IVServer = IVServer[:serverData.CipherDef.Spec.IvSize]
+
+	}
+
+	fmt.Println("cipher key exportable")
+	fmt.Printf("%+v", cipherDefKeys)
 
 	serverData.CipherDef.Keys = cipherDefKeys
 }

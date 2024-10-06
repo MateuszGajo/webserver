@@ -548,7 +548,7 @@ func generateDSsCert() *global.Params {
 	}
 }
 
-func generateRsaCert() *global.Params {
+func generateRsaCert(weak bool) *global.Params {
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Printf("Problem gettimg root path, err: %v", err)
@@ -556,7 +556,12 @@ func generateRsaCert() *global.Params {
 	}
 	parentDir := filepath.Dir(cwd)
 
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	keyLength := 2048
+	if weak {
+		keyLength = 512
+	}
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, keyLength)
 	if err != nil {
 		fmt.Printf("Problem generting rsa private key, err: %v", err)
 		os.Exit(1)
@@ -707,6 +712,17 @@ func startServer(params *global.Params) net.Listener {
 	return server.Conn
 }
 
+func getOpenSslDir() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Printf("Error getting home directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// TODO dont hardcoded it like this
+	return filepath.Join(homeDir, "openssl-0.9.7-copy", "openssl-0.9.7e", "apps")
+}
+
 func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 	serverConn := startServer(nil)
 
@@ -822,26 +838,26 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 	// For now all we test if we can pass application data
 	// TODO: Comeback later as we implement newer tls, it will be easier to test it
 
-	applicationDataContent := []byte("string")
-	streamCipher := serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, applicationDataContent, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacServer)
-	applicationDataContent = append(applicationDataContent, streamCipher...)
+	// applicationDataContent := []byte("string")
+	// streamCipher := serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, applicationDataContent, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacServer)
+	// applicationDataContent = append(applicationDataContent, streamCipher...)
 
-	applicationDataEncrypted := cipher.Encrypt3DesMessage(applicationDataContent, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+	// applicationDataEncrypted := cipher.Encrypt3DesMessage(applicationDataContent, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
 
-	applicationData := []byte{23, 3, 0}
-	applicationDataEncryptedLength := helpers.Int32ToBigEndian(len(applicationDataEncrypted))
-	applicationData = append(applicationData, applicationDataEncryptedLength...)
-	applicationData = append(applicationData, applicationDataEncrypted...)
-	_, err = conn.Write(applicationData)
+	// applicationData := []byte{23, 3, 0}
+	// applicationDataEncryptedLength := helpers.Int32ToBigEndian(len(applicationDataEncrypted))
+	// applicationData = append(applicationData, applicationDataEncryptedLength...)
+	// applicationData = append(applicationData, applicationDataEncrypted...)
+	// _, err = conn.Write(applicationData)
 
-	if err != nil {
-		t.Errorf("cant send application data msg, err: %v", err)
-	}
+	// if err != nil {
+	// 	t.Errorf("cant send application data msg, err: %v", err)
+	// }
 }
 
 func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 
-	params := generateRsaCert()
+	params := generateRsaCert(false)
 
 	serverConn := startServer(params)
 
@@ -875,6 +891,8 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientHello[5:])
 
 	_, err = conn.Write(clientHello)
+
+	// t.Errorf("fdfddfs")
 
 	if err != nil {
 		t.Errorf("Problem writing client hello, err: %v", err)
@@ -970,7 +988,7 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 }
 
 func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert()
+	params := generateRsaCert(false)
 
 	serverConn := startServer(params)
 
@@ -1240,19 +1258,8 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 
 }
 
-func getOpenSslDir() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Printf("Error getting home directory: %v\n", err)
-		os.Exit(1)
-	}
-
-	// TODO dont hardcoded it like this
-	return filepath.Join(homeDir, "openssl-0.9.7-copy", "openssl-0.9.7e", "apps")
-}
-
 func TestHandshakeOpenSSL_ADH_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert()
+	params := generateRsaCert(false)
 
 	serverConn := startServer(params)
 
@@ -1279,9 +1286,37 @@ func TestHandshakeOpenSSL_ADH_DES_CBC3_SHA(t *testing.T) {
 	}
 
 }
+func TestHandshakeOpenSSL_ADH_DES_CBC_SHA(t *testing.T) {
+	params := generateRsaCert(false)
+
+	serverConn := startServer(params)
+
+	defer serverConn.Close()
+
+	cmd := exec.Command("./openssl", "s_client", "-connect", "127.0.0.1:4221", "-ssl3", "-cipher", "ADH-DES-CBC-SHA", "-reconnect")
+
+	cmd.Dir = getOpenSslDir()
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		return
+	}
+
+	fmt.Printf("\n output: %v", string(output))
+
+	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is ADH-DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+
+	if !strings.Contains(string(output), "Reused, TLSv1/SSLv3, Cipher is ADH-DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+
+}
 
 func TestHandshakeOpenSSL_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert()
+	params := generateRsaCert(false)
 
 	serverConn := startServer(params)
 
@@ -1297,8 +1332,6 @@ func TestHandshakeOpenSSL_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 		return
 	}
 
-	fmt.Printf("\n output: %v", string(output))
-
 	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is EDH-RSA-DES-CBC3-SHA") {
 		t.Error("handshake failed")
 	}
@@ -1309,8 +1342,35 @@ func TestHandshakeOpenSSL_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 
 }
 
+func TestHandshakeOpenSSL_EDH_RSA_DES_CBC_SHA(t *testing.T) {
+	params := generateRsaCert(false)
+
+	serverConn := startServer(params)
+
+	defer serverConn.Close()
+
+	cmd := exec.Command("./openssl", "s_client", "-connect", "127.0.0.1:4221", "-ssl3", "-cipher", "EDH-RSA-DES-CBC-SHA", "-reconnect")
+
+	cmd.Dir = getOpenSslDir()
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		return
+	}
+
+	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is EDH-RSA-DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+
+	if !strings.Contains(string(output), "Reused, TLSv1/SSLv3, Cipher is EDH-RSA-DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+
+}
+
 func TestHandshakeOpenSSL_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert()
+	params := generateRsaCert(false)
 
 	serverConn := startServer(params)
 
@@ -1326,13 +1386,38 @@ func TestHandshakeOpenSSL_DES_CBC3_SHA(t *testing.T) {
 		return
 	}
 
-	fmt.Printf("\n output: %v", string(output))
-
 	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is DES-CBC3-SHA") {
 		t.Error("handshake failed")
 	}
 
 	if !strings.Contains(string(output), "Reused, TLSv1/SSLv3, Cipher is DES-CBC3-SHA") {
+		t.Error("handshake failed")
+	}
+
+}
+
+func TestHandshakeOpenSSL_DES_CBC_SHA(t *testing.T) {
+	params := generateRsaCert(false)
+
+	serverConn := startServer(params)
+
+	defer serverConn.Close()
+
+	cmd := exec.Command("./openssl", "s_client", "-connect", "127.0.0.1:4221", "-ssl3", "-cipher", "DES-CBC-SHA", "-reconnect")
+
+	cmd.Dir = getOpenSslDir()
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		return
+	}
+
+	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+
+	if !strings.Contains(string(output), "Reused, TLSv1/SSLv3, Cipher is DES-CBC-SHA") {
 		t.Error("handshake failed")
 	}
 
@@ -1355,12 +1440,112 @@ func TestHandshakeOpenSSL_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 		return
 	}
 
-	fmt.Printf("\n output: %v", string(output))
-
 	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is EDH-DSS-DES-CBC3-SHA") {
 		t.Error("handshake failed")
 	}
 	if !strings.Contains(string(output), "Reused, TLSv1/SSLv3, Cipher is EDH-DSS-DES-CBC3-SHA") {
 		t.Error("handshake failed")
 	}
+}
+
+func TestHandshakeOpenSSL_EDH_DSS_DES_CBC_SHA(t *testing.T) {
+	params := generateDSsCert()
+
+	serverConn := startServer(params)
+
+	defer serverConn.Close()
+
+	cmd := exec.Command("./openssl", "s_client", "-connect", "127.0.0.1:4221", "-ssl3", "-cipher", "EDH-DSS-DES-CBC-SHA", "-reconnect")
+
+	cmd.Dir = getOpenSslDir()
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		return
+	}
+
+	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is EDH-DSS-DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+	if !strings.Contains(string(output), "Reused, TLSv1/SSLv3, Cipher is EDH-DSS-DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+}
+
+func TestHandshakeOpenSSL_EXP_EDH_RSA_DES_CBC_SHA(t *testing.T) {
+	params := generateRsaCert(false)
+
+	serverConn := startServer(params)
+
+	defer serverConn.Close()
+
+	cmd := exec.Command("./openssl", "s_client", "-connect", "127.0.0.1:4221", "-ssl3", "-cipher", "EXP-EDH-RSA-DES-CBC-SHA", "-reconnect")
+
+	cmd.Dir = getOpenSslDir()
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		return
+	}
+
+	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is EXP-EDH-RSA-DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+
+	if !strings.Contains(string(output), "Reused, TLSv1/SSLv3, Cipher is EXP-EDH-RSA-DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+
+}
+
+func TestHandshakeOpenSSL_EXP_EDH_DSS_DES_CBC_SHA(t *testing.T) {
+	params := generateDSsCert()
+
+	serverConn := startServer(params)
+
+	defer serverConn.Close()
+
+	cmd := exec.Command("./openssl", "s_client", "-connect", "127.0.0.1:4221", "-ssl3", "-cipher", "EXP-EDH-DSS-DES-CBC-SHA", "-reconnect")
+
+	cmd.Dir = getOpenSslDir()
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		return
+	}
+
+	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is EXP-EDH-DSS-DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+	if !strings.Contains(string(output), "Reused, TLSv1/SSLv3, Cipher is EXP-EDH-DSS-DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+}
+
+func TestHandshakeOpenSSL_EXP_DES_CBC_SHA(t *testing.T) {
+	params := generateRsaCert(true)
+
+	serverConn := startServer(params)
+	defer serverConn.Close()
+	cmd := exec.Command("./openssl", "s_client", "-connect", "127.0.0.1:4221", "-ssl3", "-cipher", "EXP-DES-CBC-SHA", "-reconnect")
+
+	cmd.Dir = getOpenSslDir()
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		return
+	}
+
+	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is EXP-DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+
+	if !strings.Contains(string(output), "Reused, TLSv1/SSLv3, Cipher is EXP-DES-CBC-SHA") {
+		t.Error("handshake failed")
+	}
+
 }

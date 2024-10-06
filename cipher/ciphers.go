@@ -11,20 +11,19 @@ import (
 	"hash"
 	"math/big"
 	"os"
+	"strings"
 )
 
 func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []byte) []byte {
 	cipherDef.Keys.IVClient = encryptedData[len(encryptedData)-8:]
 
-	switch TLSCipherSuite(cipherDef.CipherSuite) {
-	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
+	switch cipherDef.Spec.EncryptionAlgorithm {
+	case EncryptionAlgorithm3DES:
 		return Decrypt3DesMessage(encryptedData, writeKey, iv)
-	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
-		return Decrypt3DesMessage(encryptedData, writeKey, iv)
-	case TLS_CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA:
-		return Decrypt3DesMessage(encryptedData, writeKey, iv)
-	case TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA:
-		return Decrypt3DesMessage(encryptedData, writeKey, iv)
+	case EncryptionAlgorithmDES:
+		return DecryptDesMessage(encryptedData, writeKey, iv)
+	case EncryptionAlgorithmDES40:
+		return DecryptDesMessage(encryptedData, writeKey, iv)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
 		os.Exit(1)
@@ -36,15 +35,13 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []
 
 func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) []byte {
 	var encryptedMsg []byte
-	switch TLSCipherSuite(cipherDef.CipherSuite) {
-	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
+	switch cipherDef.Spec.EncryptionAlgorithm {
+	case EncryptionAlgorithm3DES:
 		encryptedMsg = Encrypt3DesMessage(data, writeKey, iv)
-	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
-		encryptedMsg = Encrypt3DesMessage(data, writeKey, iv)
-	case TLS_CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA:
-		encryptedMsg = Encrypt3DesMessage(data, writeKey, iv)
-	case TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA:
-		encryptedMsg = Encrypt3DesMessage(data, writeKey, iv)
+	case EncryptionAlgorithmDES:
+		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
+	case EncryptionAlgorithmDES40:
+		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
 		os.Exit(1)
@@ -303,72 +300,160 @@ func (cipherDef *CipherDef) SelectCompressionMethod(compressionMethods []byte) e
 
 }
 
+// "NULL_WITH_NULL_NULL",
+// "RSA_WITH_NULL_MD5",
+// "DH_DSS_EXPORT_WITH_DES40_CBC_SHA",
+// "DH_anon_EXPORT_WITH_RC4_40_MD5",
+
 func (cipherDef *CipherDef) GetCipherSpecInfo() {
-	switch TLSCipherSuite(cipherDef.CipherSuite) {
-	case TLS_CIPHER_SUITE_SSL_NULL_WITH_NULL_NULL:
-	case TLS_CIPHER_SUITE_SSL_RSA_WITH_NULL_MD5:
-	case TLS_CIPHER_SUITE_SSL_RSA_WITH_NULL_SHA:
-	case TLS_CIPHER_SUITE_SSL_RSA_EXPORT_WITH_RC4_40_MD5:
-	case TLS_CIPHER_SUITE_SSL_RSA_WITH_RC4_128_MD5:
-	case TLS_CIPHER_SUITE_SSL_RSA_WITH_RC4_128_SHA:
-	case TLS_CIPHER_SUITE_SSL_RSA_EXPORT_WITH_RC2_CBC_40_MD5:
-	case TLS_CIPHER_SUITE_SSL_RSA_WITH_IDEA_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_RSA_EXPORT_WITH_DES40_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_RSA_WITH_DES_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA:
-		cipherDef.Spec.HashSize = 20
-		cipherDef.Spec.KeyMaterial = 24
-		cipherDef.Spec.IvSize = 8
-		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
-		cipherDef.Spec.KeyExchange = KeyExchangeMethodRSA
-		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
-		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA
-	case TLS_CIPHER_SUITE_SSL_DH_DSS_EXPORT_WITH_DES40_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_DH_DSS_WITH_DES_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_DH_DSS_WITH_3DES_EDE_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_DH_RSA_EXPORT_WITH_DES40_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_DH_RSA_WITH_DES_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_DH_RSA_WITH_3DES_EDE_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_DHE_DSS_EXPORT_WITH_DES40_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_DES_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA:
-		cipherDef.Spec.HashSize = 20
-		cipherDef.Spec.KeyMaterial = 24
-		cipherDef.Spec.IvSize = 8
-		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
-		cipherDef.Spec.KeyExchangeRotation = true
-		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
-		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
-		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmDSA
-	case TLS_CIPHER_SUITE_SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:
-		cipherDef.Spec.HashSize = 20
-		cipherDef.Spec.KeyMaterial = 24
-		cipherDef.Spec.IvSize = 8
-		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
-		cipherDef.Spec.KeyExchangeRotation = true
-		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
-		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
-		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA
-	case TLS_CIPHER_SUITE_SSL_DH_anon_EXPORT_WITH_RC4_40_MD5:
-	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_RC4_128_MD5:
-	case TLS_CIPHER_SUITE_SSL_DH_anon_EXPORT_WITH_DES40_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_DES_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:
-		cipherDef.Spec.HashSize = 20
-		cipherDef.Spec.KeyMaterial = 24
-		cipherDef.Spec.IvSize = 8
-		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
-		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
-		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
-		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmAnonymous
-	case TLS_CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_NULL_SHA:
-	case TLS_CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA:
-	case TLS_CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_RC4_128_SHA:
-	default:
-		cipherDef.Spec.HashSize = 0
-		cipherDef.Spec.HashSize = 0
-		cipherDef.Spec.KeyMaterial = 0
+	cipherSuite := CIPHER_SUITE_NAME[TLSCipherSuite(cipherDef.CipherSuite)]
+	cipherSuitParts := strings.Split(cipherSuite, "_")
+	index := 0
+	keyExchange := cipherSuitParts[index]
+	singinAlgorithm := ""
+	if keyExchange != "RSA" {
+		index++
+		singinAlgorithm = cipherSuitParts[index]
+	} else {
+		singinAlgorithm = "RSA"
 	}
+
+	fmt.Println(cipherSuitParts)
+	fmt.Println(index)
+	fmt.Println(singinAlgorithm)
+
+	index++
+	exportable := cipherSuitParts[index] == "EXPORT"
+
+	if exportable {
+		// to skip WITH part
+		index++
+	}
+
+	index++
+	encryptionAlgorithm := cipherSuitParts[index]
+
+	fmt.Println("encryption algo")
+	fmt.Println(encryptionAlgorithm)
+
+	encryptionAlgorithmMode := ""
+	encryptionAlgorithmDoubleMode := ""
+
+	if encryptionAlgorithm != "NULL" {
+		index++
+		encryptionAlgorithmMode = cipherSuitParts[index]
+		if index+1 != len(cipherSuitParts)-1 {
+			fmt.Println("double mode?")
+			index++
+			encryptionAlgorithmDoubleMode = cipherSuitParts[index]
+		}
+	}
+
+	index++
+	hashingMethod := cipherSuitParts[index]
+
+	switch keyExchange {
+	case "DH":
+		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
+	case "DHE":
+		cipherDef.Spec.KeyExchange = KeyExchangeMethodDH
+		cipherDef.Spec.KeyExchangeRotation = true
+	case "RSA":
+		cipherDef.Spec.KeyExchange = KeyExchangeMethodRSA
+	default:
+		fmt.Printf("\n key exchange method not implemented: %v", keyExchange)
+		os.Exit(1)
+	}
+
+	switch singinAlgorithm {
+	case "DSS":
+		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmDSA
+	case "RSA":
+		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA
+	case "anon":
+		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmAnonymous
+	default:
+		fmt.Printf("\n singinAlgorithm not implemented: %v", singinAlgorithm)
+		os.Exit(1)
+	}
+
+	if exportable {
+		// TODO: implement this
+		cipherDef.Spec.IsExportable = true
+	}
+
+	switch encryptionAlgorithm {
+	case "3DES":
+		cipherDef.Spec.KeyMaterial = 24
+		cipherDef.Spec.ExportKeyMaterial = 24
+		cipherDef.Spec.IvSize = 8
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithm3DES
+	case "DES":
+		cipherDef.Spec.KeyMaterial = 8
+		cipherDef.Spec.ExportKeyMaterial = 8
+		cipherDef.Spec.IvSize = 8
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmDES
+	case "DES40":
+		// wekening key https://datatracker.ietf.org/doc/html/draft-hoffman-des40-03
+		fmt.Printf("\n encryption algorithm DES40 isn't planned to be implemented")
+		cipherDef.Spec.KeyMaterial = 5
+		cipherDef.Spec.ExportKeyMaterial = 8
+		cipherDef.Spec.IvSize = 8
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmDES40
+		// TODO:add This from the table
+		// +--------------+--------+-----+-------+-------+-------+------+------+
+		// | Cipher       | Cipher | IsE |  Key  |  Exp. | Effec |  IV  | Bloc |
+		// |              |  Type  | xpo | Mater |  Key  |  tive | Size |   k  |
+		// |              |        | rta |  ial  | Mater |  Key  |      | Size |
+		// |              |        | ble |       |  ial  |  Bits |      |      |
+		// +--------------+--------+-----+-------+-------+-------+------+------+
+		// | NULL         | Stream |  *  |   0   |   0   |   0   |   0  |  N/A |
+		// | FORTEZZA_CBC |  Block |     |   NA  |   12  |   96  |  20  |   8  |
+		// |              |        |     |  (**) |  (**) |  (**) | (**) |      |
+		// | IDEA_CBC     |  Block |     |   16  |   16  |  128  |   8  |   8  |
+		// | RC2_CBC_40   |  Block |  *  |   5   |   16  |   40  |   8  |   8  |
+		// | RC4_40       | Stream |  *  |   5   |   16  |   40  |   0  |  N/A |
+		// | RC4_128      | Stream |     |   16  |   16  |  128  |   0  |  N/A |
+		// | DES40_CBC    |  Block |  *  |   5   |   8   |   40  |   8  |   8  |
+		// | DES_CBC      |  Block |     |   8   |   8   |   56  |   8  |   8  |
+		// | 3DES_EDE_CBC |  Block |     |   24  |   24  |  168  |   8  |   8  |
+		// +--------------+--------+-----+-------+-------+-------+------+------+
+	default:
+		fmt.Printf("\n encryption algorithm not implemented: %v", encryptionAlgorithm)
+		os.Exit(1)
+	}
+
+	switch encryptionAlgorithmMode {
+	case "CBC":
+		// TODO: implement this
+	case "EDE":
+	default:
+		fmt.Printf("\n encryption algorithm MODE not implemented: %v", encryptionAlgorithmMode)
+		os.Exit(1)
+	}
+
+	switch encryptionAlgorithmDoubleMode {
+	case "CBC":
+		// TODO: implement this
+	case "EDE":
+	case "":
+	default:
+		fmt.Printf("\n encryption algorithm double MODE not implemented: %v", encryptionAlgorithmDoubleMode)
+		os.Exit(1)
+	}
+
+	switch hashingMethod {
+	case "SHA":
+		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
+		cipherDef.Spec.HashSize = 20
+	default:
+		fmt.Printf("\n hashing method not implemented: %v", encryptionAlgorithmMode)
+		os.Exit(1)
+	}
+
+	// TODO: add check if we run program without certificate but its required
+
+	fmt.Println("cipher info!!!!")
+	fmt.Printf("%+v", cipherDef.Spec)
+
 }

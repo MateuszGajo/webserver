@@ -33,7 +33,7 @@ func (lcg *LCG8Bit) Next() uint8 {
 
 func (lcg *LCG5Bit) Next() uint8 {
 	const (
-		modulus = uint8(32)
+		modulus = uint8(31)
 		a       = uint8(13)
 		c       = uint8(17)
 	)
@@ -46,8 +46,9 @@ func (lcg *LCG5Bit) Next() uint8 {
 var lcg8Bit = LCG8Bit{seed: 1}
 var lcg5Bit = LCG5Bit{seed: 1}
 
+// TODO: test it
 func GenerateSession() []byte {
-	num := make([]byte, lcg5Bit.Next())
+	num := make([]byte, lcg5Bit.Next()+1)
 
 	for i := range num {
 		num[i] = lcg8Bit.Next()
