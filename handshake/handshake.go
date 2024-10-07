@@ -486,20 +486,15 @@ func HandleConnection(conn net.Conn, serverData *ServerData) {
 }
 
 func (serverData *ServerData) sendAlertMsg(level TlSAlertLevel, description TLSAlertDescription) {
-	msg := []byte{byte(TLSContentTypeAlert)}
-	msg = append(msg, serverData.SSLVersion...)
-	msg = append(msg, []byte{0, 2}...)
-	msg = append(msg, byte(level))
-	msg = append(msg, byte(description))
 
-	_, err := serverData.conn.Write(msg)
+	alertMsg := []byte{byte(level)}
+	alertMsg = append(alertMsg, byte(description))
 
-	if err != nil {
-		fmt.Println("Problem senidng alert")
-		os.Exit(1)
-	}
+	serverData.wBuff = append(serverData.wBuff, alertMsg...)
 
-	handleAlert(msg, serverData.conn)
+	serverData.sendData(serverData.wBuff)
+
+	handleAlert(alertMsg, serverData.conn)
 
 }
 
@@ -799,25 +794,13 @@ func (serverData *ServerData) loadCertificate() error {
 	serverCertificate = append(serverCertificate, certLengthByteSingle...)
 	serverCertificate = append(serverCertificate, serverData.cert...)
 
-	err = serverData.BuffSendData(serverCertificate)
+	err = serverData.BuffSendData(TLSContentTypeHandshake, serverCertificate)
 
 	return err
 
 }
 
 func (serverData *ServerData) sendData(data []byte) (n int, err error) {
-
-	if serverData.IsServerEncrypted && (data[0] == byte(TLSContentTypeHandshake) || data[0] == byte(TLSContentTypeApplicationData)) {
-		for i := 7; i >= 0; i-- {
-			serverData.ServerSeqNum[i] += 1
-			if serverData.ServerSeqNum[i] != 0 {
-				break
-			}
-		}
-	}
-
-	fmt.Println("what we are sedning")
-	fmt.Println(data)
 
 	n, err = serverData.conn.Write(data)
 	if err != nil {
@@ -829,17 +812,44 @@ func (serverData *ServerData) sendData(data []byte) (n int, err error) {
 	return n, err
 }
 
-func (serverData *ServerData) BuffSendData(data []byte) error {
+func (serverData *ServerData) BuffSendData(contentData TlSContentType, data []byte) error {
+	//TODO create a messages here even these unencrypted
 
 	if len(data) < 5 {
 		return fmt.Errorf("message you're sending should be more than 5 chars")
 	}
-
-	serverData.wBuff = append(serverData.wBuff, data...)
 	if data[0] == byte(TLSContentTypeHandshake) {
 		// Collect only handshake content message without record layer, its used in server key exchange
 		serverData.HandshakeMessages = append(serverData.HandshakeMessages, data[5:])
 	}
+
+	if serverData.IsServerEncrypted {
+
+		mac := serverData.generateStreamCipher([]byte{byte(contentData)}, data, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
+
+		dataWithMac := []byte{}
+		dataWithMac = append(dataWithMac, data...)
+		dataWithMac = append(dataWithMac, mac...)
+
+		encryptedMsg := serverData.CipherDef.EncryptMessage(dataWithMac, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
+
+		msg := []byte{byte(contentData)}
+		msg = append(msg, serverData.SSLVersion...)
+
+		msg = append(msg, helpers.Int32ToBigEndian(len(encryptedMsg))...)
+		msg = append(msg, encryptedMsg...)
+
+		data = msg
+
+		for i := 7; i >= 0; i-- {
+			serverData.ServerSeqNum[i] += 1
+			if serverData.ServerSeqNum[i] != 0 {
+				break
+			}
+		}
+	}
+
+	serverData.wBuff = append(serverData.wBuff, data...)
 
 	return nil
 }
@@ -907,6 +917,7 @@ func (serverData *ServerData) handleHandshake(contentData []byte) {
 		}
 
 		// lets do one write with collected few messages, don't send extra network round trips
+		// TODO: comeback here, don't seend multiple data here group them at sendData func
 		_, err = serverData.sendData(serverData.wBuff)
 		if err != nil {
 			fmt.Printf("\n problem sending server hello data, err: %v", err)
@@ -1073,7 +1084,7 @@ func (serverData *ServerData) serverKeyExchange() error {
 	serverKeyExchange = append(serverKeyExchange, handshakeLengthByte...)
 	serverKeyExchange = append(serverKeyExchange, keyExchangeData...)
 
-	err = serverData.BuffSendData(serverKeyExchange)
+	err = serverData.BuffSendData(TLSContentTypeHandshake, serverKeyExchange)
 
 	return err
 }
@@ -1134,7 +1145,7 @@ func (serverData *ServerData) serverHello() error {
 	serverData.ServerRandom = unitTimeBytes
 	serverData.ServerRandom = append(serverData.ServerRandom, randomBytes...)
 
-	err = serverData.BuffSendData(serverHello)
+	err = serverData.BuffSendData(TLSContentTypeHandshake, serverHello)
 
 	return err
 }
@@ -1146,7 +1157,7 @@ func (serverData *ServerData) serverHelloDone() error {
 	serverHelloDone = append(serverHelloDone, byte(TLSHandshakeMessageServerHelloDone))
 	serverHelloDone = append(serverHelloDone, []byte{0, 0, 0}...) // Always 0 length
 
-	err := serverData.BuffSendData(serverHelloDone)
+	err := serverData.BuffSendData(TLSContentTypeHandshake, serverHelloDone)
 
 	return err
 }
@@ -1241,7 +1252,6 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) {
 
 func (serverData *ServerData) changeCipher() {
 	serverData.ServerSeqNum = []byte{0, 0, 0, 0, 0, 0, 0, 0}
-	serverData.IsServerEncrypted = true
 
 	changeCipherSpecContent := []byte{byte(TLSCipherSpecDefault)}
 	changeCiperSpecLength := helpers.Int32ToBigEndian(len(changeCipherSpecContent))
@@ -1251,10 +1261,11 @@ func (serverData *ServerData) changeCipher() {
 	changeCipherSpecMsg = append(changeCipherSpecMsg, changeCiperSpecLength...)
 	changeCipherSpecMsg = append(changeCipherSpecMsg, changeCipherSpecContent...)
 
-	serverData.BuffSendData(changeCipherSpecMsg)
+	serverData.BuffSendData(TLSContentTypeChangeCipherSpec, changeCipherSpecMsg)
 }
 
 func (serverData *ServerData) serverFinished() error {
+	serverData.IsServerEncrypted = true
 	serverBytes := helpers.Int64ToBIgEndian(int64(serverSender))
 
 	verifyHashMac := []byte{}
@@ -1275,21 +1286,21 @@ func (serverData *ServerData) serverFinished() error {
 	verifyMacWithHeaders = append(verifyMacWithHeaders, msgLenEndian...)
 	verifyMacWithHeaders = append(verifyMacWithHeaders, verifyHashMac...)
 
-	mac := serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, verifyMacWithHeaders, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
+	// mac := serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, verifyMacWithHeaders, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
 
-	combinedBytes := []byte{}
-	combinedBytes = append(combinedBytes, verifyMacWithHeaders...)
-	combinedBytes = append(combinedBytes, mac...)
+	// combinedBytes := []byte{}
+	// combinedBytes = append(combinedBytes, verifyMacWithHeaders...)
+	// combinedBytes = append(combinedBytes, mac...)
 
-	encryptedMsg := serverData.CipherDef.EncryptMessage(combinedBytes, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
-	encryptedMsgLength := helpers.Int32ToBigEndian(len(encryptedMsg))
+	// encryptedMsg := serverData.CipherDef.EncryptMessage(combinedBytes, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
+	// encryptedMsgLength := helpers.Int32ToBigEndian(len(encryptedMsg))
 
-	serverFinished := []byte{byte(TLSContentTypeHandshake)}
-	serverFinished = append(serverFinished, serverData.SSLVersion...)
-	serverFinished = append(serverFinished, encryptedMsgLength...)
-	serverFinished = append(serverFinished, encryptedMsg...)
+	// serverFinished := []byte{byte(TLSContentTypeHandshake)}
+	// serverFinished = append(serverFinished, serverData.SSLVersion...)
+	// serverFinished = append(serverFinished, encryptedMsgLength...)
+	// serverFinished = append(serverFinished, encryptedMsg...)
 
-	serverData.BuffSendData(serverFinished)
+	serverData.BuffSendData(TLSContentTypeHandshake, verifyMacWithHeaders)
 
 	return nil
 
