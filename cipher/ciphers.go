@@ -24,6 +24,8 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []
 		return DecryptDesMessage(encryptedData, writeKey, iv)
 	case EncryptionAlgorithmDES40:
 		return DecryptDesMessage(encryptedData, writeKey, iv)
+	case EncryptionAlgorithmRC4:
+		return cipherDef.DecryptRC(encryptedData, writeKey)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
 		os.Exit(1)
@@ -42,6 +44,8 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) []b
 		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
 	case EncryptionAlgorithmDES40:
 		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
+	case EncryptionAlgorithmRC4:
+		encryptedMsg = cipherDef.EncryptRC(data, writeKey)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
 		os.Exit(1)
@@ -395,7 +399,6 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmDES
 	case "DES40":
 		// wekening key https://datatracker.ietf.org/doc/html/draft-hoffman-des40-03
-		fmt.Printf("\n encryption algorithm DES40 isn't planned to be implemented")
 		cipherDef.Spec.KeyMaterial = 5
 		cipherDef.Spec.ExportKeyMaterial = 8
 		cipherDef.Spec.IvSize = 8
@@ -418,6 +421,9 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		// | DES_CBC      |  Block |     |   8   |   8   |   56  |   8  |   8  |
 		// | 3DES_EDE_CBC |  Block |     |   24  |   24  |  168  |   8  |   8  |
 		// +--------------+--------+-----+-------+-------+-------+------+------+
+	case "RC4":
+		cipherDef.Spec.IvSize = 0
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmRC4
 	default:
 		fmt.Printf("\n encryption algorithm not implemented: %v", encryptionAlgorithm)
 		os.Exit(1)
@@ -427,6 +433,12 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 	case "CBC":
 		// TODO: implement this
 	case "EDE":
+	case "128":
+		cipherDef.Spec.KeyMaterial = 16
+		cipherDef.Spec.ExportKeyMaterial = 16
+	case "40":
+		cipherDef.Spec.KeyMaterial = 5
+		cipherDef.Spec.ExportKeyMaterial = 16
 	default:
 		fmt.Printf("\n encryption algorithm MODE not implemented: %v", encryptionAlgorithmMode)
 		os.Exit(1)

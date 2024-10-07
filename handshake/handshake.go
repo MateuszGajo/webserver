@@ -957,7 +957,6 @@ func (serverData *ServerData) loadSession(sessionId string) {
 
 		serverData.PreMasterSecret = session.PreMasterSecret
 		serverData.MasterKey = session.MasterKey
-		serverData.CipherDef = session.CipherDef
 		serverData.cert = session.cert
 		serverData.session = session.session
 	}

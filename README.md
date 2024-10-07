@@ -13,6 +13,7 @@ Project supports following ciphers of ssl 3.0:
 * EXP-EDH-DSS-DES-CBC-SHA
 * EXP-DES-CBC-SHA (need to use week rsa key)
 * EXP-ADH-DES-CBC-SHA
+* RC4-SHA
 
 Support features:
 * session resumption

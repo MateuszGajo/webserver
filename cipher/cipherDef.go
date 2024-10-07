@@ -2,6 +2,7 @@ package cipher
 
 import (
 	"crypto/dsa"
+	"crypto/rc4"
 	"crypto/rsa"
 	"math/big"
 )
@@ -70,11 +71,16 @@ type CipherDef struct {
 	Keys               CipherKeys
 	Spec               CipherSpec
 	CipherSuite        uint16
-	CompressionMethod  byte
 	DhParams           DhParams
 	Rsa                RsaCipher
 	Dsa                DsaCipher
+	Rc4                RC4Cipher
 	PreferServerCipher bool
+}
+
+type RC4Cipher struct {
+	EncryptCipher *rc4.Cipher
+	DecryptCipher *rc4.Cipher
 }
 
 type RsaCipher struct {
