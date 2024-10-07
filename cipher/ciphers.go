@@ -67,7 +67,7 @@ func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) []byte {
 		cipherDef.DhParams.ClientPublic = clinetPublicKeyInt
 		preMasterSecret = cipherDef.DhParams.ComputePreMasterSecret().Bytes()
 	case KeyExchangeMethodRSA:
-		decrypted, err := rsa.DecryptPKCS1v15(rand.Reader, &cipherDef.Rsa.PrivateKey, data)
+		decrypted, err := rsa.DecryptPKCS1v15(rand.Reader, cipherDef.Rsa.PrivateKey, data)
 		if err != nil {
 			fmt.Printf("couldnt decrypt rsa, err: %v", err)
 			os.Exit(1)
@@ -121,7 +121,10 @@ func (cipherDef *CipherDef) SignData(hash []byte) ([]byte, error) {
 	case SignatureAlgorithmAnonymous:
 		return []byte{}, nil
 	case SignatureAlgorithmRSA:
-		signature, err := rsa.SignPKCS1v15(rand.Reader, &cipherDef.Rsa.PrivateKey, crypto.Hash(0), hash)
+		if cipherDef.Rsa.PrivateKey == nil {
+			return nil, fmt.Errorf("\n Cant find rsa private key")
+		}
+		signature, err := rsa.SignPKCS1v15(rand.Reader, cipherDef.Rsa.PrivateKey, crypto.Hash(0), hash)
 
 		if err != nil {
 			return nil, fmt.Errorf("\n problem ecnrypting data, err: %v", err)
@@ -130,7 +133,10 @@ func (cipherDef *CipherDef) SignData(hash []byte) ([]byte, error) {
 		return signature, nil
 
 	case SignatureAlgorithmDSA:
-		r, s, err := dsa.Sign(rand.Reader, &cipherDef.Dsa.PrivateKey, hash)
+		if cipherDef.Dsa.PrivateKey == nil {
+			return nil, fmt.Errorf("\n Cant find dsa private key")
+		}
+		r, s, err := dsa.Sign(rand.Reader, cipherDef.Dsa.PrivateKey, hash)
 		if err != nil {
 			return nil, fmt.Errorf("\n error while singing, err: %v", err)
 		}
@@ -153,7 +159,7 @@ func (cipherDef *CipherDef) VerifySignedData(hash, signature []byte) error {
 	switch cipherDef.Spec.SignatureAlgorithm {
 	case SignatureAlgorithmAnonymous:
 	case SignatureAlgorithmRSA:
-		err = rsa.VerifyPKCS1v15(&cipherDef.Rsa.PublicKey, crypto.Hash(0), hash, signature)
+		err = rsa.VerifyPKCS1v15(cipherDef.Rsa.PublicKey, crypto.Hash(0), hash, signature)
 
 	case SignatureAlgorithmDSA:
 		var params DSA_SIG
@@ -163,7 +169,7 @@ func (cipherDef *CipherDef) VerifySignedData(hash, signature []byte) error {
 			fmt.Printf("\n error unmarshaling, err: %v", err)
 		}
 
-		ok := dsa.Verify(&cipherDef.Dsa.PublicKey, hash, params.R, params.S)
+		ok := dsa.Verify(cipherDef.Dsa.PublicKey, hash, params.R, params.S)
 		if !ok {
 			return fmt.Errorf("cant verify dsa signature")
 		}

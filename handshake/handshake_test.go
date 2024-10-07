@@ -933,7 +933,7 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 		t.Error("\n can convert pubkey to rsa pub key")
 	}
 
-	serverData.CipherDef.Rsa.PublicKey = *pubKey
+	serverData.CipherDef.Rsa.PublicKey = pubKey
 
 	err = serverData.verifyServerKeyExchange(serverKeyExchange)
 
@@ -1204,7 +1204,7 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 		t.Error("\n can convert pubkey to dsa pub key")
 	}
 
-	serverData.CipherDef.Dsa.PublicKey = *pubKey
+	serverData.CipherDef.Dsa.PublicKey = pubKey
 
 	err = serverData.verifyServerKeyExchange(serverKeyExchange)
 

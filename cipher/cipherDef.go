@@ -84,13 +84,12 @@ type RC4Cipher struct {
 }
 
 type RsaCipher struct {
-	PrivateKey rsa.PrivateKey
-	PublicKey  rsa.PublicKey
+	PrivateKey *rsa.PrivateKey
+	PublicKey  *rsa.PublicKey
 }
-
 type DsaCipher struct {
-	PrivateKey dsa.PrivateKey
-	PublicKey  dsa.PublicKey
+	PrivateKey *dsa.PrivateKey
+	PublicKey  *dsa.PublicKey
 }
 
 type DhParams struct {
