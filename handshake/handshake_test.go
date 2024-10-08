@@ -1429,3 +1429,51 @@ func TestHandshakeOpenSSL_RC4_SHA(t *testing.T) {
 	}
 
 }
+
+func TestHandshakeOpenSSL_RC4_MD5(t *testing.T) {
+	params := generateRsaCert(true)
+
+	serverConn := startServer(params)
+	defer serverConn.Close()
+
+	if err := runOpensslCommand("RC4-MD5"); err != nil {
+		t.Error(err)
+	}
+
+}
+
+func TestHandshakeOpenSSL_EXP_RC4_MD5(t *testing.T) {
+	params := generateRsaCert(true)
+
+	serverConn := startServer(params)
+	defer serverConn.Close()
+
+	if err := runOpensslCommand("EXP-RC4-MD5"); err != nil {
+		t.Error(err)
+	}
+
+}
+
+func TestHandshakeOpenSSL_ADH_RC4_MD5(t *testing.T) {
+	params := generateRsaCert(true)
+
+	serverConn := startServer(params)
+	defer serverConn.Close()
+
+	if err := runOpensslCommand("ADH-RC4-MD5"); err != nil {
+		t.Error(err)
+	}
+
+}
+
+func TestHandshakeOpenSSL_EXP_ADH_RC4_MD5(t *testing.T) {
+	params := generateRsaCert(true)
+
+	serverConn := startServer(params)
+	defer serverConn.Close()
+
+	if err := runOpensslCommand("EXP-ADH-RC4-MD5"); err != nil {
+		t.Error(err)
+	}
+
+}

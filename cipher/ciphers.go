@@ -464,6 +464,9 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 	case "SHA":
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
 		cipherDef.Spec.HashSize = 20
+	case "MD5":
+		cipherDef.Spec.HashAlgorithm = HashAlgorithmMD5
+		cipherDef.Spec.HashSize = 16
 	default:
 		fmt.Printf("\n hashing method not implemented: %v", encryptionAlgorithmMode)
 		os.Exit(1)
