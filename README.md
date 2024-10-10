@@ -19,6 +19,7 @@ Project supports following ciphers of ssl 3.0 (based on rfc 6101):
 * EXP-RC4-MD5 (Uses weak key)
 * ADH-RC4-MD5
 * EXP-ADH-RC4-MD5
+* EXP-RC2-CBC-MD5
 Other ciphers can work but hasn't been tested yet.
 
 *All fortezza ciphers are not implemented in ssl 3.0.
@@ -27,6 +28,7 @@ Weak keys
 Some cipher suites support only weak keys (<512 bytes):
 * EXP-RC4-MD5 
 * EXP-DES-CBC-SHA 
+* EXP-RC2-CBC-MD5
 
 
 
