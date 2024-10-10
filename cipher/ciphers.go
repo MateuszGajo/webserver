@@ -26,6 +26,8 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []
 		return DecryptDesMessage(encryptedData, writeKey, iv)
 	case EncryptionAlgorithmRC4:
 		return cipherDef.DecryptRC(encryptedData, writeKey)
+	case EncryptionAlgorithmRC2:
+		return cipherDef.DecryptRC2(encryptedData, writeKey, iv)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
 		os.Exit(1)
@@ -46,6 +48,8 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) []b
 		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
 	case EncryptionAlgorithmRC4:
 		encryptedMsg = cipherDef.EncryptRC(data, writeKey)
+	case EncryptionAlgorithmRC2:
+		encryptedMsg = cipherDef.EncryptRC2(data, writeKey, iv)
 	default:
 		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
 		os.Exit(1)
@@ -310,11 +314,6 @@ func (cipherDef *CipherDef) SelectCompressionMethod(compressionMethods []byte) e
 
 }
 
-// "NULL_WITH_NULL_NULL",
-// "RSA_WITH_NULL_MD5",
-// "DH_DSS_EXPORT_WITH_DES40_CBC_SHA",
-// "DH_anon_EXPORT_WITH_RC4_40_MD5",
-
 func (cipherDef *CipherDef) GetCipherSpecInfo() {
 	cipherSuite := CIPHER_SUITE_NAME[TLSCipherSuite(cipherDef.CipherSuite)]
 	cipherSuitParts := strings.Split(cipherSuite, "_")
@@ -392,6 +391,8 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		cipherDef.Spec.IsExportable = true
 	}
 
+	//TODO improve parsing this, especial rc2_cbc_40
+
 	switch encryptionAlgorithm {
 	case "3DES":
 		cipherDef.Spec.KeyMaterial = 24
@@ -409,27 +410,12 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		cipherDef.Spec.ExportKeyMaterial = 8
 		cipherDef.Spec.IvSize = 8
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmDES40
-		// TODO:add This from the table
-		// +--------------+--------+-----+-------+-------+-------+------+------+
-		// | Cipher       | Cipher | IsE |  Key  |  Exp. | Effec |  IV  | Bloc |
-		// |              |  Type  | xpo | Mater |  Key  |  tive | Size |   k  |
-		// |              |        | rta |  ial  | Mater |  Key  |      | Size |
-		// |              |        | ble |       |  ial  |  Bits |      |      |
-		// +--------------+--------+-----+-------+-------+-------+------+------+
-		// | NULL         | Stream |  *  |   0   |   0   |   0   |   0  |  N/A |
-		// | FORTEZZA_CBC |  Block |     |   NA  |   12  |   96  |  20  |   8  |
-		// |              |        |     |  (**) |  (**) |  (**) | (**) |      |
-		// | IDEA_CBC     |  Block |     |   16  |   16  |  128  |   8  |   8  |
-		// | RC2_CBC_40   |  Block |  *  |   5   |   16  |   40  |   8  |   8  |
-		// | RC4_40       | Stream |  *  |   5   |   16  |   40  |   0  |  N/A |
-		// | RC4_128      | Stream |     |   16  |   16  |  128  |   0  |  N/A |
-		// | DES40_CBC    |  Block |  *  |   5   |   8   |   40  |   8  |   8  |
-		// | DES_CBC      |  Block |     |   8   |   8   |   56  |   8  |   8  |
-		// | 3DES_EDE_CBC |  Block |     |   24  |   24  |  168  |   8  |   8  |
-		// +--------------+--------+-----+-------+-------+-------+------+------+
 	case "RC4":
 		cipherDef.Spec.IvSize = 0
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmRC4
+	case "RC2":
+		cipherDef.Spec.IvSize = 8
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmRC2
 	default:
 		fmt.Printf("\n encryption algorithm not implemented: %v", encryptionAlgorithm)
 		os.Exit(1)
@@ -449,12 +435,17 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		fmt.Printf("\n encryption algorithm MODE not implemented: %v", encryptionAlgorithmMode)
 		os.Exit(1)
 	}
-
 	switch encryptionAlgorithmDoubleMode {
 	case "CBC":
 		// TODO: implement this
 	case "EDE":
 	case "":
+	case "128":
+		cipherDef.Spec.KeyMaterial = 16
+		cipherDef.Spec.ExportKeyMaterial = 16
+	case "40":
+		cipherDef.Spec.KeyMaterial = 5
+		cipherDef.Spec.ExportKeyMaterial = 16
 	default:
 		fmt.Printf("\n encryption algorithm double MODE not implemented: %v", encryptionAlgorithmDoubleMode)
 		os.Exit(1)

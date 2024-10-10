@@ -1475,5 +1475,16 @@ func TestHandshakeOpenSSL_EXP_ADH_RC4_MD5(t *testing.T) {
 	if err := runOpensslCommand("EXP-ADH-RC4-MD5"); err != nil {
 		t.Error(err)
 	}
+}
+
+func TestHandshakeOpenSSL_EXP_RC2_CBC_MD5(t *testing.T) {
+	params := generateRsaCert(true)
+
+	serverConn := startServer(params)
+	defer serverConn.Close()
+
+	if err := runOpensslCommand("EXP-RC2-CBC-MD5"); err != nil {
+		t.Error(err)
+	}
 
 }

@@ -1,6 +1,7 @@
 package cipher
 
 import (
+	"crypto/cipher"
 	"crypto/dsa"
 	"crypto/rc4"
 	"crypto/rsa"
@@ -75,12 +76,18 @@ type CipherDef struct {
 	Rsa                RsaCipher
 	Dsa                DsaCipher
 	Rc4                RC4Cipher
+	Rc2                RC2Cipherr
 	PreferServerCipher bool
 }
 
 type RC4Cipher struct {
 	EncryptCipher *rc4.Cipher
 	DecryptCipher *rc4.Cipher
+}
+
+type RC2Cipherr struct {
+	EncryptCipher *cipher.Block
+	DecryptCipher *cipher.Block
 }
 
 type RsaCipher struct {
