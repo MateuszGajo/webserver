@@ -8,13 +8,12 @@ import (
 	"encoding/asn1"
 	"encoding/binary"
 	"fmt"
-	"hash"
 	"math/big"
 	"os"
 	"strings"
 )
 
-func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []byte) []byte {
+func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []byte) ([]byte, error) {
 	cipherDef.Keys.IVClient = encryptedData[len(encryptedData)-8:]
 
 	switch cipherDef.Spec.EncryptionAlgorithm {
@@ -25,40 +24,36 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []
 	case EncryptionAlgorithmDES40:
 		return DecryptDesMessage(encryptedData, writeKey, iv)
 	case EncryptionAlgorithmRC4:
-		return cipherDef.DecryptRC(encryptedData, writeKey)
+		return cipherDef.DecryptRC4(encryptedData, writeKey)
 	case EncryptionAlgorithmRC2:
 		return cipherDef.DecryptRC2(encryptedData, writeKey, iv)
 	default:
-		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
-		os.Exit(1)
-
+		return []byte{}, fmt.Errorf("encryption algorithm: %v not implemented", cipherDef.Spec.EncryptionAlgorithm)
 	}
 
-	return []byte{}
 }
 
-func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) []byte {
+func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) ([]byte, error) {
 	var encryptedMsg []byte
+	var err error
 	switch cipherDef.Spec.EncryptionAlgorithm {
 	case EncryptionAlgorithm3DES:
-		encryptedMsg = Encrypt3DesMessage(data, writeKey, iv)
+		encryptedMsg, err = Encrypt3DesMessage(data, writeKey, iv)
 	case EncryptionAlgorithmDES:
-		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
+		encryptedMsg, err = EncryptDesMessage(data, writeKey, iv)
 	case EncryptionAlgorithmDES40:
-		encryptedMsg = EncryptDesMessage(data, writeKey, iv)
+		encryptedMsg, err = EncryptDesMessage(data, writeKey, iv)
 	case EncryptionAlgorithmRC4:
-		encryptedMsg = cipherDef.EncryptRC(data, writeKey)
+		encryptedMsg, err = cipherDef.EncryptRC4(data, writeKey)
 	case EncryptionAlgorithmRC2:
-		encryptedMsg = cipherDef.EncryptRC2(data, writeKey, iv)
+		encryptedMsg, err = cipherDef.EncryptRC2(data, writeKey, iv)
 	default:
-		fmt.Printf("unkonw cipher suite: %v", cipherDef.CipherSuite)
-		os.Exit(1)
-
+		return []byte{}, fmt.Errorf("encryption algorithm: %v not implemented", cipherDef.Spec.EncryptionAlgorithm)
 	}
 
-	cipherDef.Keys.IVServer = encryptedMsg[len(encryptedMsg)-8:]
+	// cipherDef.Keys.IVServer = encryptedMsg[len(encryptedMsg)-8:]
 
-	return encryptedMsg
+	return encryptedMsg, err
 }
 
 func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) []byte {
@@ -82,19 +77,7 @@ func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) []byte {
 		os.Exit(1)
 	}
 
-	fmt.Println("skip all??")
-
 	return preMasterSecret
-
-}
-
-func signKeyParams(algorithm hash.Hash, clientRandom, serverRandom, serverParams []byte) []byte {
-	algorithm.Reset()
-	algorithm.Write(clientRandom)
-	algorithm.Write(serverRandom)
-	algorithm.Write(serverParams)
-
-	return algorithm.Sum(nil)
 
 }
 
@@ -317,49 +300,19 @@ func (cipherDef *CipherDef) SelectCompressionMethod(compressionMethods []byte) e
 func (cipherDef *CipherDef) GetCipherSpecInfo() {
 	cipherSuite := CIPHER_SUITE_NAME[TLSCipherSuite(cipherDef.CipherSuite)]
 	cipherSuitParts := strings.Split(cipherSuite, "_")
-	index := 0
-	keyExchange := cipherSuitParts[index]
-	singinAlgorithm := ""
-	if keyExchange != "RSA" {
-		index++
-		singinAlgorithm = cipherSuitParts[index]
-	} else {
-		singinAlgorithm = "RSA"
+	keyExchange := cipherSuitParts[0]
+	singinAlgorithm := cipherSuitParts[1]
+	exportMode := cipherSuitParts[2]
+	encryptionAlgorithm := cipherSuitParts[3]
+	encryptionAlgorithmParams := strings.Split(cipherSuitParts[4], "-")
+	if len(cipherSuitParts) < 5 {
+		fmt.Println("hello")
+		fmt.Println(cipherSuitParts)
+		os.Exit(1)
 	}
+	hashingMethod := cipherSuitParts[5]
 
-	fmt.Println(cipherSuitParts)
-	fmt.Println(index)
-	fmt.Println(singinAlgorithm)
-
-	index++
-	exportable := cipherSuitParts[index] == "EXPORT"
-
-	if exportable {
-		// to skip WITH part
-		index++
-	}
-
-	index++
-	encryptionAlgorithm := cipherSuitParts[index]
-
-	fmt.Println("encryption algo")
-	fmt.Println(encryptionAlgorithm)
-
-	encryptionAlgorithmMode := ""
-	encryptionAlgorithmDoubleMode := ""
-
-	if encryptionAlgorithm != "NULL" {
-		index++
-		encryptionAlgorithmMode = cipherSuitParts[index]
-		if index+1 != len(cipherSuitParts)-1 {
-			fmt.Println("double mode?")
-			index++
-			encryptionAlgorithmDoubleMode = cipherSuitParts[index]
-		}
-	}
-
-	index++
-	hashingMethod := cipherSuitParts[index]
+	exportable := exportMode == "EXPORT"
 
 	switch keyExchange {
 	case "DH":
@@ -387,11 +340,8 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 	}
 
 	if exportable {
-		// TODO: implement this
 		cipherDef.Spec.IsExportable = true
 	}
-
-	//TODO improve parsing this, especial rc2_cbc_40
 
 	switch encryptionAlgorithm {
 	case "3DES":
@@ -417,38 +367,27 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		cipherDef.Spec.IvSize = 8
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmRC2
 	default:
+		fmt.Println("hello")
+		fmt.Println(cipherSuitParts)
 		fmt.Printf("\n encryption algorithm not implemented: %v", encryptionAlgorithm)
 		os.Exit(1)
 	}
 
-	switch encryptionAlgorithmMode {
-	case "CBC":
-		// TODO: implement this
-	case "EDE":
-	case "128":
-		cipherDef.Spec.KeyMaterial = 16
-		cipherDef.Spec.ExportKeyMaterial = 16
-	case "40":
-		cipherDef.Spec.KeyMaterial = 5
-		cipherDef.Spec.ExportKeyMaterial = 16
-	default:
-		fmt.Printf("\n encryption algorithm MODE not implemented: %v", encryptionAlgorithmMode)
-		os.Exit(1)
-	}
-	switch encryptionAlgorithmDoubleMode {
-	case "CBC":
-		// TODO: implement this
-	case "EDE":
-	case "":
-	case "128":
-		cipherDef.Spec.KeyMaterial = 16
-		cipherDef.Spec.ExportKeyMaterial = 16
-	case "40":
-		cipherDef.Spec.KeyMaterial = 5
-		cipherDef.Spec.ExportKeyMaterial = 16
-	default:
-		fmt.Printf("\n encryption algorithm double MODE not implemented: %v", encryptionAlgorithmDoubleMode)
-		os.Exit(1)
+	for _, param := range encryptionAlgorithmParams {
+		switch param {
+		case "CBC":
+			// TODO: implement this, we use cbc by default everywhere
+		case "EDE":
+		case "128":
+			cipherDef.Spec.KeyMaterial = 16
+			cipherDef.Spec.ExportKeyMaterial = 16
+		case "40":
+			cipherDef.Spec.KeyMaterial = 5
+			cipherDef.Spec.ExportKeyMaterial = 16
+		default:
+			fmt.Printf("\n encryption param not implemented %v", param)
+			os.Exit(1)
+		}
 	}
 
 	switch hashingMethod {
@@ -459,7 +398,7 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmMD5
 		cipherDef.Spec.HashSize = 16
 	default:
-		fmt.Printf("\n hashing method not implemented: %v", encryptionAlgorithmMode)
+		fmt.Printf("\n hashing method not implemented: %v", hashingMethod)
 		os.Exit(1)
 	}
 

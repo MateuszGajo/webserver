@@ -386,7 +386,11 @@ func (serverData *ServerData) verifyServerChangeCipher(data []byte) error {
 
 func (serverData *ServerData) verifyServerFinished(data []byte) error {
 	encryptedServerFinishedData := data[5:]
-	decryptedServerFinishedData := serverData.CipherDef.DecryptMessage(encryptedServerFinishedData, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
+	decryptedServerFinishedData, err := serverData.CipherDef.DecryptMessage(encryptedServerFinishedData, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
+
+	if err != nil {
+		return err
+	}
 
 	decryptedServerFinishedDataNoHeader := decryptedServerFinishedData[4:]
 
@@ -417,7 +421,7 @@ func (serverData *ServerData) verifyServerFinished(data []byte) error {
 	return nil
 }
 
-func (serverData *ServerData) generateClientFinishedMsg() []byte {
+func (serverData *ServerData) generateClientFinishedMsg() ([]byte, error) {
 
 	clientBytes := helpers.Int64ToBIgEndian(int64(ClientSender))
 	md5Hash := generate_finished_handshake_mac(md5.New(), serverData.MasterKey, clientBytes, serverData.HandshakeMessages) // -1 without last message witch is client verify
@@ -437,12 +441,22 @@ func (serverData *ServerData) generateClientFinishedMsg() []byte {
 
 	msg = append(msg, streamCipher...)
 
-	encrypted := cipher.Encrypt3DesMessage(msg, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+	serverIV := serverData.CipherDef.Keys.IVServer
+
+	encrypted, err := serverData.CipherDef.EncryptMessage(msg, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+
+	// We implemented in the way that our program is always the server, so we're assigin iv to serverIv variable, but in the test we're client so there is a problem here, i don't think im gonna fix this as don't plan to implement program to be client.
+	serverData.CipherDef.Keys.IVClient = serverData.CipherDef.Keys.IVServer
+	serverData.CipherDef.Keys.IVServer = serverIV
+
+	if err != nil {
+		return nil, err
+	}
 
 	finishedMsg := []byte{22, 3, 0, 0, 64}
 	finishedMsg = append(finishedMsg, encrypted...)
 
-	return finishedMsg
+	return finishedMsg, nil
 
 }
 
@@ -807,7 +821,10 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 
 	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientKeyExchangeMsg[5:])
 
-	finishedMsg := serverData.generateClientFinishedMsg()
+	finishedMsg, err := serverData.generateClientFinishedMsg()
+	if err != nil {
+		t.Error(err)
+	}
 	_, err = conn.Write(finishedMsg)
 
 	if err != nil {
@@ -842,7 +859,11 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 	streamCipher := serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, applicationDataContent, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacServer)
 	applicationDataContent = append(applicationDataContent, streamCipher...)
 
-	applicationDataEncrypted := cipher.Encrypt3DesMessage(applicationDataContent, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+	applicationDataEncrypted, err := serverData.CipherDef.EncryptMessage(applicationDataContent, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+
+	if err != nil {
+		t.Error(err)
+	}
 
 	applicationData := []byte{23, 3, 0}
 	applicationDataEncryptedLength := helpers.Int32ToBigEndian(len(applicationDataEncrypted))
@@ -959,7 +980,10 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 
 	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientKeyExchangeMsg[5:])
 
-	finishedMsg := serverData.generateClientFinishedMsg()
+	finishedMsg, err := serverData.generateClientFinishedMsg()
+	if err != nil {
+		t.Error(err)
+	}
 	_, err = conn.Write(finishedMsg)
 	if err != nil {
 		t.Errorf("Problem writing client finished messgae :%v", err)
@@ -1100,7 +1124,10 @@ func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
 
 	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientKeyExchangeMsg[5:])
 
-	finishedMsg := serverData.generateClientFinishedMsg()
+	finishedMsg, err := serverData.generateClientFinishedMsg()
+	if err != nil {
+		t.Error(err)
+	}
 	_, err = conn.Write(finishedMsg)
 
 	if err != nil {
@@ -1230,7 +1257,10 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 
 	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientKeyExchangeMsg[5:])
 
-	finishedMsg := serverData.generateClientFinishedMsg()
+	finishedMsg, err := serverData.generateClientFinishedMsg()
+	if err != nil {
+		t.Error(err)
+	}
 	_, err = conn.Write(finishedMsg)
 	if err != nil {
 		t.Errorf("Problem writing client finished messgae :%v", err)

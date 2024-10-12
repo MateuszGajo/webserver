@@ -4,7 +4,6 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"fmt"
-	"os"
 	"strconv"
 )
 
@@ -281,31 +280,33 @@ func (c *Rc2Cipher) Decrypt(dst, src []byte) {
 	binary.LittleEndian.PutUint16(dst[6:], r3)
 }
 
-func (cipherDef CipherDef) EncryptRC2(data, key, iv []byte) []byte {
-	var err error
+func (cipherDef CipherDef) EncryptRC2(data, key, iv []byte) ([]byte, error) {
 	if cipherDef.Rc2.EncryptCipher == nil {
-		encryptCipher, _ := New(key, len(key)*8)
+		encryptCipher, err := New(key, len(key)*8)
+
+		if err != nil {
+			return nil, fmt.Errorf("problem creating encrypt rc2 cipher: %v", err)
+		}
 		cipherDef.Rc2.EncryptCipher = &encryptCipher
 	}
 	padLength := roundUpToMultiple(len(data), 8)
 	dataPadded := addCustomPadding(data, padLength)
 
-	if err != nil {
-		fmt.Println("problem creating rc2 cipher")
-		os.Exit(1)
-	}
-
 	mode := cipher.NewCBCEncrypter(*cipherDef.Rc2.EncryptCipher, iv)
 	decrypted := make([]byte, len(dataPadded))
 	mode.CryptBlocks(decrypted, dataPadded)
 
-	return decrypted
+	return decrypted, nil
 }
 
-func (cipherDef CipherDef) DecryptRC2(data, key, iv []byte) []byte {
+func (cipherDef CipherDef) DecryptRC2(data, key, iv []byte) ([]byte, error) {
 	if cipherDef.Rc2.DecryptCipher == nil {
-		decryptCipher, _ := New(key, len(key)*8)
+		decryptCipher, err := New(key, len(key)*8)
+		if err != nil {
+			return nil, fmt.Errorf("problem creating decrypt rc2 cipher: %v", err)
+		}
 		cipherDef.Rc2.DecryptCipher = &decryptCipher
+
 	}
 
 	mode := cipher.NewCBCDecrypter(*cipherDef.Rc2.DecryptCipher, iv)
@@ -314,10 +315,8 @@ func (cipherDef CipherDef) DecryptRC2(data, key, iv []byte) []byte {
 
 	decodedMsgWithoutPadding, err := removeCustomPadding(decrypted, 8)
 	if err != nil {
-		fmt.Println("problem removing padding")
-		fmt.Println(err)
-		os.Exit(1)
+		return nil, fmt.Errorf("pproblem removing padding: %v", err)
 	}
 
-	return decodedMsgWithoutPadding
+	return decodedMsgWithoutPadding, nil
 }

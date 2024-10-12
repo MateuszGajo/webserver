@@ -5,7 +5,6 @@ import (
 	"crypto/cipher"
 	"crypto/des"
 	"fmt"
-	"os"
 )
 
 var PADDING_LENGTH = 8
@@ -72,39 +71,36 @@ func Encrypt3Des(key, iv, ciphertext []byte) ([]byte, error) {
 	return encrypted, nil
 }
 
-func Decrypt3DesMessage(encryptedData, writeKey, iv []byte) []byte {
+func Decrypt3DesMessage(encryptedData, writeKey, iv []byte) ([]byte, error) {
 	encryptedMessage := encryptedData
 	decodedMsg, err := Decrypt3Des(writeKey, iv, encryptedMessage)
 	if err != nil {
-		fmt.Println("problem decrypting data")
-		fmt.Println(err)
-		os.Exit(1)
+		return nil, fmt.Errorf("problem decrypting data: %v", err)
 	}
 
 	decodedMsgWithoutPadding, err := removeCustomPadding(decodedMsg, len(encryptedData))
 	if err != nil {
-		fmt.Println("problem removing padding")
-		fmt.Println(err)
-		os.Exit(1)
+
+		return nil, fmt.Errorf("problem removing padding: %v", err)
 	}
 
-	return decodedMsgWithoutPadding
+	return decodedMsgWithoutPadding, nil
 }
 
-func Encrypt3DesMessage(data, writeKey, iv []byte) []byte {
-	// PADDING_LENGTH = BLOCK SIZE IN TRIPED DES IS 8 BYTES (64-bits)
+func Encrypt3DesMessage(data, writeKey, iv []byte) ([]byte, error) {
+	fmt.Println("`````")
+	fmt.Println("`ENCRYPT 3DES MESSAGE`")
+	fmt.Println("`````")
 	padLength := roundUpToMultiple(len(data), des.BlockSize)
 
 	dataPadded := addCustomPadding(data, padLength)
 
 	encryptedMsg, err := Encrypt3Des(writeKey, iv, dataPadded)
 	if err != nil {
-		fmt.Println("problem ecrypting data")
-		fmt.Println(err)
-		os.Exit(1)
+		return nil, fmt.Errorf("problem Encrypting data: %v", err)
 	}
 
-	return encryptedMsg
+	return encryptedMsg, nil
 }
 
 func DecryptDes(key, iv, ciphertext []byte) ([]byte, error) {
@@ -143,40 +139,31 @@ func EncryptDes(key, iv, ciphertext []byte) ([]byte, error) {
 	return encrypted, nil
 }
 
-func DecryptDesMessage(encryptedData, writeKey, iv []byte) []byte {
+func DecryptDesMessage(encryptedData, writeKey, iv []byte) ([]byte, error) {
 	encryptedMessage := encryptedData
 	decodedMsg, err := DecryptDes(writeKey, iv, encryptedMessage)
-	fmt.Println("write key")
-	fmt.Println(writeKey)
+
 	if err != nil {
-		fmt.Println("problem decrypting data")
-		fmt.Println(err)
-		os.Exit(1)
+		return nil, fmt.Errorf("Problem decrypting data: %v", err)
 	}
 
 	decodedMsgWithoutPadding, err := removeCustomPadding(decodedMsg, len(encryptedData))
 	if err != nil {
-		fmt.Println("problem removing padding")
-		fmt.Println(err)
-		os.Exit(1)
+		return nil, fmt.Errorf("Problem removing padding: %v", err)
 	}
 
-	return decodedMsgWithoutPadding
+	return decodedMsgWithoutPadding, nil
 }
 
-func EncryptDesMessage(data, writeKey, iv []byte) []byte {
+func EncryptDesMessage(data, writeKey, iv []byte) ([]byte, error) {
 	padLength := roundUpToMultiple(len(data), des.BlockSize)
 
 	dataPadded := addCustomPadding(data, padLength)
 
 	encryptedMsg, err := EncryptDes(writeKey, iv, dataPadded)
-	fmt.Println("write key")
-	fmt.Println(writeKey)
 	if err != nil {
-		fmt.Println("problem ecrypting data")
-		fmt.Println(err)
-		os.Exit(1)
+		return nil, fmt.Errorf("Problem ecrypting data: %v", err)
 	}
 
-	return encryptedMsg
+	return encryptedMsg, nil
 }

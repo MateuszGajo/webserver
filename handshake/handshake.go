@@ -615,7 +615,13 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) err
 	dataContent := clientData[5:]
 	var err error
 	if serverData.IsClientEncrypted {
-		decryptedClientData := serverData.CipherDef.DecryptMessage(clientData[5:], serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+		decryptedClientData, err := serverData.CipherDef.DecryptMessage(clientData[5:], serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
+
+		if err != nil {
+			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionBadRecordMac)
+			return fmt.Errorf("\n Decryption failed: %v", err)
+		}
+
 		dataWithoutMac, err := serverData.verifyMac(contentType, decryptedClientData)
 
 		if err != nil {
@@ -830,7 +836,12 @@ func (serverData *ServerData) BuffSendData(contentData TlSContentType, data []by
 		dataWithMac = append(dataWithMac, data...)
 		dataWithMac = append(dataWithMac, mac...)
 
-		encryptedMsg := serverData.CipherDef.EncryptMessage(dataWithMac, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
+		encryptedMsg, err := serverData.CipherDef.EncryptMessage(dataWithMac, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
+
+		if err != nil {
+			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionBadRecordMac)
+			return err
+		}
 
 		msg = append(msg, helpers.Int32ToBigEndian(len(encryptedMsg))...)
 		msg = append(msg, encryptedMsg...)
@@ -1285,20 +1296,6 @@ func (serverData *ServerData) serverFinished() error {
 	verifyMacWithHeaders := []byte{byte(TLSHandshakeMessageFinished)}
 	verifyMacWithHeaders = append(verifyMacWithHeaders, msgLenEndian...)
 	verifyMacWithHeaders = append(verifyMacWithHeaders, verifyHashMac...)
-
-	// mac := serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, verifyMacWithHeaders, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
-
-	// combinedBytes := []byte{}
-	// combinedBytes = append(combinedBytes, verifyMacWithHeaders...)
-	// combinedBytes = append(combinedBytes, mac...)
-
-	// encryptedMsg := serverData.CipherDef.EncryptMessage(combinedBytes, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
-	// encryptedMsgLength := helpers.Int32ToBigEndian(len(encryptedMsg))
-
-	// serverFinished := []byte{byte(TLSContentTypeHandshake)}
-	// serverFinished = append(serverFinished, serverData.SSLVersion...)
-	// serverFinished = append(serverFinished, encryptedMsgLength...)
-	// serverFinished = append(serverFinished, encryptedMsg...)
 
 	err = serverData.BuffSendData(TLSContentTypeHandshake, verifyMacWithHeaders)
 
