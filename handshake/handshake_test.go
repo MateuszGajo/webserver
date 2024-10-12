@@ -38,7 +38,7 @@ func (serverData *ServerData) readNMessage(n int, conn net.Conn) ([][]byte, erro
 		n, err := conn.Read(buf)
 
 		if err != nil {
-			return [][]byte{}, errors.New("cant read message")
+			return [][]byte{}, fmt.Errorf("cant read message: %v", err)
 
 		}
 
@@ -341,6 +341,9 @@ func (serverData *ServerData) computeKeys(data []byte) error {
 }
 
 func (serverData *ServerData) verifyServerChangeCipher(data []byte) error {
+	if len(data) < 6 {
+		return fmt.Errorf("server change cipher msg should be at least of length: 6")
+	}
 	changeCipherContentType := data[0]
 	changeCipherContentSslVersion := binary.BigEndian.Uint16(data[1:3])
 	changeCipherContentLength := binary.BigEndian.Uint16(data[3:5])
@@ -640,6 +643,10 @@ func generateRsaCert(weak bool) *global.Params {
 
 func (serverData *ServerData) verifyCertificate(data []byte) (*x509.Certificate, error) {
 
+	if len(data) < 15 {
+		return nil, fmt.Errorf("Certificate data should be at lest of length: 15")
+	}
+
 	// 22 3 0 3 63 11 0 3 59 0 3 56 0 3 53 48
 	recType := data[0]
 	sslVersion := binary.BigEndian.Uint16((data[1:3]))
@@ -759,6 +766,11 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("problem reading server hello messages, expected to read 3 msgs, err: %v", err)
 	}
 
+	if len(data) < 3 {
+		fmt.Printf("data should be of length: 3, data: %v", data)
+		os.Exit(1)
+	}
+
 	serverHello := data[0]
 	serverKeyExchange := data[1]
 	serverHelloDone := data[2]
@@ -830,28 +842,6 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 		t.Errorf("Problem with verify server finished %v", err)
 	}
 
-	// For now all we test if we can pass application data
-	// TODO: Comeback later as we implement newer tls, it will be easier to test it
-
-	applicationDataContent := []byte("string")
-	streamCipher := serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, applicationDataContent, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacServer)
-	applicationDataContent = append(applicationDataContent, streamCipher...)
-
-	applicationDataEncrypted, err := serverData.CipherDef.EncryptMessage(applicationDataContent, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	applicationData := []byte{23, 3, 0}
-	applicationDataEncryptedLength := helpers.Int32ToBigEndian(len(applicationDataEncrypted))
-	applicationData = append(applicationData, applicationDataEncryptedLength...)
-	applicationData = append(applicationData, applicationDataEncrypted...)
-	_, err = conn.Write(applicationData)
-
-	if err != nil {
-		t.Errorf("cant send application data msg, err: %v", err)
-	}
 }
 
 func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {

@@ -129,7 +129,6 @@ func (cipherDef *CipherDef) SignData(hash []byte) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unsupported Algorithm: %v", cipherDef.Spec.SignatureAlgorithm)
 	}
-	return []byte{}, nil
 
 }
 

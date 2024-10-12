@@ -17,6 +17,7 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"sync"
 	"time"
 	s3_cipher "webserver/cipher"
 	"webserver/global"
@@ -227,7 +228,14 @@ type ServerData struct {
 	reuseSession      bool
 }
 
-var sessions = make(map[string]*ServerData)
+type SafeSession struct {
+	mu   sync.Mutex
+	data map[string]*ServerData
+}
+
+var sessions = SafeSession{
+	data: make(map[string]*ServerData),
+}
 
 func (serverData *ServerData) loadCert(certPath, keyPath string) error {
 
@@ -445,7 +453,7 @@ Loop:
 		buff := make([]byte, 1024)
 		n, err := conn.Read(buff)
 		if err != nil {
-			fmt.Println("Error reading Client Hello:", err)
+			fmt.Println("Error reading handshake data:", err)
 			break Loop
 		}
 
@@ -943,16 +951,20 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
 			return fmt.Errorf("\n problem sending server finished msgs: %v", err)
 		}
-
-		sessions[string(serverData.session)] = serverData
+		sessions.mu.Lock()
+		sessions.data[string(serverData.session)] = serverData
+		sessions.mu.Unlock()
 
 	}
 	return nil
 }
 
 func (serverData *ServerData) loadSession(sessionId string) {
-	if sessions[sessionId] != nil {
-		session := sessions[sessionId]
+	sessions.mu.Lock()
+	session := sessions.data[sessionId]
+	sessions.mu.Unlock()
+	if session != nil {
+		session := session
 		serverData.IsClientEncrypted = false
 		serverData.reuseSession = true
 
