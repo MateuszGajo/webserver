@@ -87,9 +87,6 @@ func expandKey(key []byte, t1 int) [64]uint16 {
 		k[i] = uint16(l[2*i]) + uint16(l[2*i+1])*256
 	}
 
-	fmt.Println("k table")
-	fmt.Println(k)
-
 	return k
 }
 

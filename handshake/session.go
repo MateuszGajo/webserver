@@ -46,7 +46,6 @@ func (lcg *LCG5Bit) Next() uint8 {
 var lcg8Bit = LCG8Bit{seed: 1}
 var lcg5Bit = LCG5Bit{seed: 1}
 
-// TODO: test it
 func GenerateSession() []byte {
 	num := make([]byte, lcg5Bit.Next()+1)
 

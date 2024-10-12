@@ -63,18 +63,16 @@ func computePublicKey(g, privateKey, p *big.Int) *big.Int {
 	return publicKey
 }
 
-func (dh *DhParams) GenerateDhParams() []byte {
+func (dh *DhParams) GenerateDhParams() ([]byte, error) {
 
 	pPrime, ok := new(big.Int).SetString("3", 16)
 	if !ok {
-		fmt.Println("Error generating private key:")
-		return []byte{}
+		return nil, fmt.Errorf("error converting string to big int")
 	}
 	gGenerator := big.NewInt(2)
 	serverPrivateVal, err := generatePrivateKey(pPrime)
 	if err != nil {
-		fmt.Println("Error generating private key:", err)
-		return []byte{}
+		return nil, fmt.Errorf("error generating private key: %v", err)
 	}
 	serverPublicKey := computePublicKey(gGenerator, serverPrivateVal, pPrime)
 
@@ -99,29 +97,11 @@ func (dh *DhParams) GenerateDhParams() []byte {
 	resp = append(resp, []byte{0, byte(len(publicKey))}...)
 	resp = append(resp, publicKey...)
 
-	return resp
+	return resp, nil
 }
 
 // Compute the shared secret
 // client public key, server private key, prime number  client public key^server private mod p
 func (dh *DhParams) ComputePreMasterSecret() *big.Int {
-	fmt.Println("clientPublic")
-	fmt.Println("clientPublic")
-	fmt.Println("clientPublic")
-	fmt.Println("clientPublic")
-	fmt.Println("clientPublic")
-	fmt.Println("clientPublic")
-	fmt.Println("clientPublic")
-	fmt.Println("clientPublic")
-	fmt.Println("clientPublic")
-	fmt.Println("clientPublic")
-	fmt.Println("clientPublic")
-	fmt.Println(dh.ClientPublic.Bytes())
-	fmt.Println("private")
-	fmt.Println(dh.Private.Bytes())
-	fmt.Println("p")
-	fmt.Println(dh.P)
-	fmt.Println("result ")
-	fmt.Println(new(big.Int).Exp(dh.ClientPublic, dh.Private, dh.P).Bytes())
 	return new(big.Int).Exp(dh.ClientPublic, dh.Private, dh.P)
 }

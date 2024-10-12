@@ -56,7 +56,7 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) ([]
 	return encryptedMsg, err
 }
 
-func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) []byte {
+func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) ([]byte, error) {
 	var preMasterSecret []byte
 	switch cipherDef.Spec.KeyExchange {
 	case KeyExchangeMethodDH:
@@ -68,16 +68,14 @@ func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) []byte {
 	case KeyExchangeMethodRSA:
 		decrypted, err := rsa.DecryptPKCS1v15(rand.Reader, cipherDef.Rsa.PrivateKey, data)
 		if err != nil {
-			fmt.Printf("couldnt decrypt rsa, err: %v", err)
-			os.Exit(1)
+			return nil, fmt.Errorf("couldnt decrypt rsa, err: %v", err)
 		}
 		preMasterSecret = decrypted
 	default:
-		fmt.Print("Key exchang method not implmeneted yet")
-		os.Exit(1)
+		return nil, fmt.Errorf("key exchange method: %v not implmeneted yet", cipherDef.Spec.KeyExchange)
 	}
 
-	return preMasterSecret
+	return preMasterSecret, nil
 
 }
 
@@ -86,21 +84,16 @@ type DSA_SIG struct {
 	S *big.Int
 }
 
-func (cipherDef *CipherDef) GenerateServerKeyExchange() []byte {
-
-	var resp []byte
+func (cipherDef *CipherDef) GenerateServerKeyExchange() ([]byte, error) {
 
 	switch cipherDef.Spec.KeyExchange {
 	case KeyExchangeMethodDH:
-		resp = cipherDef.DhParams.GenerateDhParams()
+		return cipherDef.DhParams.GenerateDhParams()
 	case KeyExchangeMethodRSA:
-		return []byte{}
+		return []byte{}, nil
 	default:
-		fmt.Printf("Key exchange parameters not implemented for: %v", cipherDef.Spec.KeyExchange)
-		os.Exit(1)
+		return nil, fmt.Errorf("Key exchange parameters not implemented for: %v", cipherDef.Spec.KeyExchange)
 	}
-
-	return resp
 }
 
 func (cipherDef *CipherDef) SignData(hash []byte) ([]byte, error) {
@@ -134,8 +127,7 @@ func (cipherDef *CipherDef) SignData(hash []byte) ([]byte, error) {
 		return signature, nil
 
 	default:
-		fmt.Printf("Unsupported Algorithm: %v", cipherDef.Spec.SignatureAlgorithm)
-		os.Exit(1)
+		return nil, fmt.Errorf("unsupported Algorithm: %v", cipherDef.Spec.SignatureAlgorithm)
 	}
 	return []byte{}, nil
 
@@ -153,7 +145,7 @@ func (cipherDef *CipherDef) VerifySignedData(hash, signature []byte) error {
 
 		_, err := asn1.Unmarshal(signature, &params)
 		if err != nil {
-			fmt.Printf("\n error unmarshaling, err: %v", err)
+			return fmt.Errorf("\n error unmarshaling, err: %v", err)
 		}
 
 		ok := dsa.Verify(cipherDef.Dsa.PublicKey, hash, params.R, params.S)
@@ -162,7 +154,7 @@ func (cipherDef *CipherDef) VerifySignedData(hash, signature []byte) error {
 		}
 
 	default:
-		fmt.Printf("Unsupported Algorithm: %v", cipherDef.Spec.SignatureAlgorithm)
+		return fmt.Errorf("unsupported Algorithm: %v", cipherDef.Spec.SignatureAlgorithm)
 		os.Exit(1)
 	}
 
@@ -197,7 +189,6 @@ func (cipherDef *CipherDef) VerifySignedData(hash, signature []byte) error {
 // Average Time 			14 			42 			21 		11
 // Bytes/sec 				7,988 		2,663 		5,320 	10,167
 // source: https://www.cse.wustl.edu/~jain/cse567-06/ftp/encryption_perf/
-// TODO: maybe let's do own comparision??
 
 // Sweet32 attacks on cipher block 64 bytes (des, 3des, blow fish)
 // The DES ciphers (and triple-DES) only have a 64-bit block size. ciphers are mostly vulnerable to birthday attacks when the message is 2n/2 block of messages. This enables an attacker to run JavaScript in a browser and send large amounts of traffic during the same TLS connection, creating a collision. With this collision, the attacker is able to retrieve information from a session cookie.
@@ -297,19 +288,17 @@ func (cipherDef *CipherDef) SelectCompressionMethod(compressionMethods []byte) e
 
 }
 
-func (cipherDef *CipherDef) GetCipherSpecInfo() {
+func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 	cipherSuite := CIPHER_SUITE_NAME[TLSCipherSuite(cipherDef.CipherSuite)]
 	cipherSuitParts := strings.Split(cipherSuite, "_")
+	if len(cipherSuitParts) < 6 {
+		panic("These suit should never have less than 6 parts")
+	}
 	keyExchange := cipherSuitParts[0]
 	singinAlgorithm := cipherSuitParts[1]
 	exportMode := cipherSuitParts[2]
 	encryptionAlgorithm := cipherSuitParts[3]
 	encryptionAlgorithmParams := strings.Split(cipherSuitParts[4], "-")
-	if len(cipherSuitParts) < 5 {
-		fmt.Println("hello")
-		fmt.Println(cipherSuitParts)
-		os.Exit(1)
-	}
 	hashingMethod := cipherSuitParts[5]
 
 	exportable := exportMode == "EXPORT"
@@ -401,10 +390,5 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() {
 		fmt.Printf("\n hashing method not implemented: %v", hashingMethod)
 		os.Exit(1)
 	}
-
-	// TODO: add check if we run program without certificate but its required
-
-	fmt.Println("cipher info!!!!")
-	fmt.Printf("%+v", cipherDef.Spec)
-
+	return nil
 }

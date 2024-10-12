@@ -14,8 +14,6 @@ func loadParams() *global.Params {
 	key := flag.String("key", "", "Cert private key")
 	flag.Parse()
 
-	fmt.Println(key)
-
 	if *cert == "" || *key == "" {
 		return nil
 	}
@@ -38,8 +36,6 @@ func main() {
 	// server := server.CreateServer()
 	// server.RunServer()
 	params := loadParams()
-
-	fmt.Println(params)
 
 	var wg sync.WaitGroup
 	wg.Add(1)

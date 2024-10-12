@@ -88,9 +88,6 @@ func Decrypt3DesMessage(encryptedData, writeKey, iv []byte) ([]byte, error) {
 }
 
 func Encrypt3DesMessage(data, writeKey, iv []byte) ([]byte, error) {
-	fmt.Println("`````")
-	fmt.Println("`ENCRYPT 3DES MESSAGE`")
-	fmt.Println("`````")
 	padLength := roundUpToMultiple(len(data), des.BlockSize)
 
 	dataPadded := addCustomPadding(data, padLength)

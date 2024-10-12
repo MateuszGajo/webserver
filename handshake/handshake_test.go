@@ -28,12 +28,12 @@ import (
 	"webserver/helpers"
 )
 
+var OpenSSLVersion = "openssl-0.9.7e"
+
 func (serverData *ServerData) readNMessage(n int, conn net.Conn) ([][]byte, error) {
 	messages := [][]byte{}
 	leftovers := []byte{}
 	for len(messages) < n {
-		fmt.Println(len(messages))
-		fmt.Println(messages)
 		buf := make([]byte, 1024)
 		n, err := conn.Read(buf)
 
@@ -48,11 +48,9 @@ func (serverData *ServerData) readNMessage(n int, conn net.Conn) ([][]byte, erro
 		data, rest, err := serverData.Parser(input)
 		leftovers = rest
 		if err != nil {
-			fmt.Println("problem parsing")
-			fmt.Println(err)
+			fmt.Printf("\n problem parsing, err %v", err)
 			os.Exit(1)
 		}
-		fmt.Println("hello message", data)
 		messages = append(messages, data...)
 	}
 
@@ -96,6 +94,7 @@ func (serverData *ServerData) generateClientHello() []byte {
 
 	if err != nil {
 		fmt.Printf("\n cant convert to big endian while creating client hello msg, err: %v", err)
+		os.Exit(1)
 	}
 
 	clientHello = append(clientHello, recordLength...)
@@ -127,8 +126,9 @@ func (serverData *ServerData) verifyServerHello(data []byte) error {
 	algorithmIndexStart := 44 + sessionLength
 	serverData.ServerRandom = handshakeRandomBytes
 
-	fmt.Println("session")
-	fmt.Println(session)
+	if reflect.DeepEqual(serverData.session, session) {
+		return fmt.Errorf("Session are different, expecting: %v, got:%v", serverData.session, session)
+	}
 
 	// 2 for protocol version
 	// client random 32
@@ -144,17 +144,9 @@ func (serverData *ServerData) verifyServerHello(data []byte) error {
 		return fmt.Errorf("version should be ssl 3.0")
 	}
 
-	// if recLength != 42 {
-	// 	return fmt.Errorf("Record length shuld be 42, we got: %v", recLength)
-	// }
-
 	if handshakeType != byte(TLSHandshakeMessageServerHello) {
 		return fmt.Errorf("Handshake type should be server hello")
 	}
-
-	// if handshakeLength != 38 {
-	// 	return fmt.Errorf("Handshake length should be 38")
-	// }
 
 	currentTime := time.Now().Unix()
 
@@ -263,22 +255,14 @@ func (serverData *ServerData) verifyServerKeyExchangeDHParams(data []byte) (int,
 		return 0, fmt.Errorf("Server key exchange is longer than it supposed to be, message: %v, len:%v, expected len: %v ", data, len(data), index)
 	}
 
-	fmt.Println("servery key exchange")
-	fmt.Println("servery key exchange")
-	fmt.Println("servery key exchange")
-
 	p := dhParams[0]
 	q := dhParams[1]
 	serverPublic := dhParams[2]
 
-	fmt.Println(p)
-	fmt.Println(q)
-	fmt.Println(serverPublic)
-
 	serverData.CipherDef.DhParams = cipher.DhParams{
 		P:            p,
 		Q:            q,
-		ClientPublic: serverPublic, // TODO to fix itin this case server public
+		ClientPublic: serverPublic, // Its confusing because i've written program to be use as server, and now we're resuing functions as a client, i won't fix it as i will be only focusing to test it with openssl.
 	}
 
 	return index, nil
@@ -313,11 +297,11 @@ func (serverData *ServerData) verifyServerHelloDone(data []byte) error {
 	return nil
 }
 
-func (serverData *ServerData) computeKeys(data []byte) {
-	fmt.Println("before pre master")
-	preMasterSecret := serverData.CipherDef.ComputerMasterSecret(data)
-	fmt.Println("after pre master")
-	fmt.Println(preMasterSecret)
+func (serverData *ServerData) computeKeys(data []byte) error {
+	preMasterSecret, err := serverData.CipherDef.ComputerMasterSecret(data)
+	if err != nil {
+		return err
+	}
 
 	tripledDesHashSize := serverData.CipherDef.Spec.HashSize
 	tripledDesKeyMaterialSize := serverData.CipherDef.Spec.KeyMaterial
@@ -333,13 +317,8 @@ func (serverData *ServerData) computeKeys(data []byte) {
 
 	keyBlockLen := tripledDesHashSize*2 + tripledDesKeyMaterialSize*2 + tripledDesIvSize*2
 
-	fmt.Println("master key seed")
-	fmt.Println(masterKeySeed)
-
 	masterKey := ssl_prf(preMasterSecret, masterKeySeed, MASTER_SECRET_LENGTH)
 
-	fmt.Println("master key")
-	fmt.Println(masterKey)
 	keyBlock := ssl_prf(masterKey, keyBlockSeed, keyBlockLen)
 
 	macEndIndex := tripledDesHashSize * 2
@@ -357,6 +336,8 @@ func (serverData *ServerData) computeKeys(data []byte) {
 	serverData.CipherDef.Keys = cipherDefKeys
 
 	serverData.MasterKey = masterKey
+
+	return nil
 }
 
 func (serverData *ServerData) verifyServerChangeCipher(data []byte) error {
@@ -464,7 +445,7 @@ func generateRandBytes(len int) []byte {
 	b := make([]byte, len)
 	_, err := rand.Read(b)
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Println("Error generting random bytes:", err)
 		os.Exit(1)
 	}
 
@@ -472,13 +453,13 @@ func generateRandBytes(len int) []byte {
 
 }
 
-// Generated with cmd as go doesnt support dsa, can't create certificate .crt, there was crypto.Signer lacking
+// Generated with cmd as go doesnt support dsa, can't create certificate because there is no crypto.Signer implementation
 // TODO: we can make it better, same liens are reused over and over
 func generateDSsCert() *global.Params {
 	cwd, err := os.Getwd()
 
 	if err != nil {
-		fmt.Errorf("Cant get root path, err: %v", err)
+		fmt.Errorf("cant get root path, err: %v", err)
 		os.Exit(1)
 	}
 	parentDir := filepath.Dir(cwd) + "/cert/dsa_test"
@@ -489,6 +470,7 @@ func generateDSsCert() *global.Params {
 		err = os.Mkdir(parentDir, 0775)
 		if err != nil {
 			fmt.Printf("problem creating folder, err: %v", err)
+			os.Exit(1)
 		}
 	}
 
@@ -588,7 +570,6 @@ func generateRsaCert(weak bool) *global.Params {
 			fmt.Printf("Error creating folder: %v", err)
 			os.Exit(1)
 		}
-		fmt.Println("Folder created: cert")
 	}
 
 	if _, err := os.Stat(parentDir + "/cert/rsa_test"); os.IsNotExist(err) {
@@ -598,7 +579,6 @@ func generateRsaCert(weak bool) *global.Params {
 			fmt.Printf("Error creating folder: %v", err)
 			os.Exit(1)
 		}
-		fmt.Println("Folder created: rsa test")
 	}
 
 	keyFile, err := os.Create(parentDir + "/cert/rsa_test/" + "server.key")
@@ -676,7 +656,6 @@ func (serverData *ServerData) verifyCertificate(data []byte) (*x509.Certificate,
 		return nil, err
 	}
 
-	fmt.Println("yey parsed cert")
 	switch serverData.CipherDef.Spec.SignatureAlgorithm {
 	case cipher.SignatureAlgorithmRSA:
 		if cert.PublicKeyAlgorithm != x509.RSA {
@@ -727,14 +706,13 @@ func startServer(params *global.Params) net.Listener {
 }
 
 func getOpenSslDir() string {
-	homeDir, err := os.UserHomeDir()
+	dir, err := os.Getwd()
 	if err != nil {
 		fmt.Printf("Error getting home directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	// TODO dont hardcoded it like this
-	return filepath.Join(homeDir, "openssl-0.9.7-copy", "openssl-0.9.7e", "apps")
+	return filepath.Join(dir, "../openssl", OpenSSLVersion, "apps")
 }
 
 func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
@@ -1297,8 +1275,6 @@ func runOpensslCommand(cipher string) error {
 	if err != nil {
 		return fmt.Errorf("Error running openssl command: %v\n, output: %s \n", err, output)
 	}
-
-	fmt.Printf("\n output: %v", string(output))
 
 	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is "+cipher) {
 		return fmt.Errorf("handshake failed, can't establish new handshake")
