@@ -12,6 +12,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"handshakeServer/cipher"
+	"handshakeServer/helpers"
 	"io"
 	"math/big"
 	"net"
@@ -20,15 +22,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
-	"webserver/cipher"
-	"webserver/global"
-	"webserver/helpers"
 )
 
 var OpenSSLVersion = "openssl-0.9.7e"
+var Address = "127.0.0.1"
+var Port = "4221"
 
 func (serverData *ServerData) readNMessage(n int, conn net.Conn) ([][]byte, error) {
 	messages := [][]byte{}
@@ -71,8 +71,8 @@ func (serverData *ServerData) generateClientHello() []byte {
 	}
 	sslVersion := []byte{3, 0}
 
-	if serverData.SSLVersion != nil {
-		sslVersion = serverData.SSLVersion
+	if serverData.Version != nil {
+		sslVersion = serverData.Version
 	}
 
 	clientHello := []byte{22}
@@ -98,7 +98,7 @@ func (serverData *ServerData) generateClientHello() []byte {
 	}
 
 	clientHello = append(clientHello, recordLength...)
-	clientHello = append(clientHello, byte(TLSHandshakeMessageClientHello))
+	clientHello = append(clientHello, byte(HandshakeMessageClientHello))
 	clientHello = append(clientHello, contentDataBigEndian...)
 	clientHello = append(clientHello, sslVersion...)
 	clientHello = append(clientHello, clientRandomBytes...)
@@ -136,7 +136,7 @@ func (serverData *ServerData) verifyServerHello(data []byte) error {
 	handshakeAlgorithm := binary.BigEndian.Uint16((data[algorithmIndexStart : algorithmIndexStart+2]))
 	handshakeCompression := data[algorithmIndexStart+2]
 
-	if recType != byte(TLSContentTypeHandshake) {
+	if recType != byte(ContentTypeHandshake) {
 		return fmt.Errorf("should return tls handshake type")
 	}
 
@@ -144,7 +144,7 @@ func (serverData *ServerData) verifyServerHello(data []byte) error {
 		return fmt.Errorf("version should be ssl 3.0")
 	}
 
-	if handshakeType != byte(TLSHandshakeMessageServerHello) {
+	if handshakeType != byte(HandshakeMessageServerHello) {
 		return fmt.Errorf("Handshake type should be server hello")
 	}
 
@@ -155,7 +155,7 @@ func (serverData *ServerData) verifyServerHello(data []byte) error {
 	}
 
 	if handshakeAlgorithm != uint16(serverData.CipherDef.CipherSuite) {
-		return fmt.Errorf("Expected algorithm: %v, got:%v", cipher.TLS_CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA, handshakeAlgorithm)
+		return fmt.Errorf("Expected algorithm: %v, got:%v", cipher.CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA, handshakeAlgorithm)
 	}
 
 	if handshakeCompression != 0 {
@@ -173,7 +173,7 @@ func (serverData *ServerData) verifyServerKeyExchange(data []byte) error {
 	handshakeType := data[5]
 	handshakeLength := uint32(data[6])<<16 | uint32(data[7])<<8 | uint32(data[8])
 
-	if recType != byte(TLSContentTypeHandshake) {
+	if recType != byte(ContentTypeHandshake) {
 		return fmt.Errorf("should return tls handshake type")
 	}
 
@@ -181,7 +181,7 @@ func (serverData *ServerData) verifyServerKeyExchange(data []byte) error {
 		return fmt.Errorf("version should be ssl 3.0")
 	}
 
-	if handshakeType != byte(TLSHandshakeMessageServerKeyExchange) {
+	if handshakeType != byte(HandshakeMessageServerKeyExchange) {
 		return fmt.Errorf("Handshake type should be server key exchange")
 	}
 
@@ -275,7 +275,7 @@ func (serverData *ServerData) verifyServerHelloDone(data []byte) error {
 	handshakeType := data[5]
 	handshakeLength := uint32(data[6])<<16 | uint32(data[7])<<8 | uint32(data[8])
 
-	if recType != byte(TLSContentTypeHandshake) {
+	if recType != byte(ContentTypeHandshake) {
 		return fmt.Errorf("should return tls handshake type")
 	}
 
@@ -287,7 +287,7 @@ func (serverData *ServerData) verifyServerHelloDone(data []byte) error {
 		return fmt.Errorf("Record length shuld be 4")
 	}
 
-	if handshakeType != byte(TLSHandshakeMessageServerHelloDone) {
+	if handshakeType != byte(HandshakeMessageServerHelloDone) {
 		return fmt.Errorf("Handshake type should be server hello")
 	}
 
@@ -349,7 +349,7 @@ func (serverData *ServerData) verifyServerChangeCipher(data []byte) error {
 	changeCipherContentLength := binary.BigEndian.Uint16(data[3:5])
 	changeCipherContentData := data[5]
 
-	if changeCipherContentType != byte(TLSContentTypeChangeCipherSpec) {
+	if changeCipherContentType != byte(ContentTypeChangeCipherSpec) {
 		return fmt.Errorf("should return tls change cipher type type")
 	}
 
@@ -383,12 +383,12 @@ func (serverData *ServerData) verifyServerFinished(data []byte) error {
 	serverShaHash := decryptedServerFinishedDataNoHeader[16:36]
 	serverCipher := decryptedServerFinishedDataNoHeader[36:]
 
-	md5Hash := generate_finished_handshake_mac(md5.New(), serverData.MasterKey, serverBytes, serverData.HandshakeMessages) // -1 without last message witch is client verify
-	shaHash := generate_finished_handshake_mac(sha1.New(), serverData.MasterKey, serverBytes, serverData.HandshakeMessages)
+	md5Hash := serverData.generate_finished_handshake_mac(md5.New(), serverBytes, serverData.HandshakeMessages) // -1 without last message witch is client verify
+	shaHash := serverData.generate_finished_handshake_mac(sha1.New(), serverBytes, serverData.HandshakeMessages)
 	cipherData := decryptedServerFinishedData[:4]
 	cipherData = append(cipherData, md5Hash...)
 	cipherData = append(cipherData, shaHash...)
-	streamCipher := serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, cipherData, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacServer)
+	streamCipher := serverData.generateStreamCipher([]byte{byte(ContentTypeHandshake)}, cipherData, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacServer)
 
 	if !reflect.DeepEqual(serverMd5Hash, md5Hash) {
 		return fmt.Errorf("Server finished md5 is diffrent than computed expected: %v, got: %v", md5Hash, serverMd5Hash)
@@ -408,8 +408,8 @@ func (serverData *ServerData) verifyServerFinished(data []byte) error {
 func (serverData *ServerData) generateClientFinishedMsg() ([]byte, error) {
 
 	clientBytes := helpers.Int64ToBIgEndian(int64(ClientSender))
-	md5Hash := generate_finished_handshake_mac(md5.New(), serverData.MasterKey, clientBytes, serverData.HandshakeMessages) // -1 without last message witch is client verify
-	shaHash := generate_finished_handshake_mac(sha1.New(), serverData.MasterKey, clientBytes, serverData.HandshakeMessages)
+	md5Hash := serverData.generate_finished_handshake_mac(md5.New(), clientBytes, serverData.HandshakeMessages) // -1 without last message witch is client verify
+	shaHash := serverData.generate_finished_handshake_mac(sha1.New(), clientBytes, serverData.HandshakeMessages)
 
 	hashMessages := append(md5Hash, shaHash...)
 
@@ -421,7 +421,7 @@ func (serverData *ServerData) generateClientFinishedMsg() ([]byte, error) {
 
 	serverData.HandshakeMessages = append(serverData.HandshakeMessages, msg)
 
-	streamCipher := serverData.generateStreamCipher([]byte{byte(TLSContentTypeHandshake)}, msg, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacClient)
+	streamCipher := serverData.generateStreamCipher([]byte{byte(ContentTypeHandshake)}, msg, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacClient)
 
 	msg = append(msg, streamCipher...)
 
@@ -458,7 +458,7 @@ func generateRandBytes(len int) []byte {
 
 // Generated with cmd as go doesnt support dsa, can't create certificate because there is no crypto.Signer implementation
 // TODO: we can make it better, same liens are reused over and over
-func generateDSsCert() *global.Params {
+func generateDSsCert() *HttpServerCertParam {
 	cwd, err := os.Getwd()
 
 	if err != nil {
@@ -541,13 +541,13 @@ func generateDSsCert() *global.Params {
 		os.Exit(1)
 	}
 
-	return &global.Params{
+	return &HttpServerCertParam{
 		CertPath: parentDir + "/server.crt",
 		KeyPath:  parentDir + "/server.key",
 	}
 }
 
-func generateRsaCert(weak bool) *global.Params {
+func generateRsaCert(weak bool) *HttpServerCertParam {
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Printf("Problem gettimg root path, err: %v", err)
@@ -634,7 +634,7 @@ func generateRsaCert(weak bool) *global.Params {
 		Bytes: certDer,
 	})
 
-	return &global.Params{
+	return &HttpServerCertParam{
 		CertPath: parentDir + "/cert/rsa_test/server.crt",
 		KeyPath:  parentDir + "/cert/rsa_test/server.key",
 	}
@@ -677,7 +677,7 @@ func (serverData *ServerData) verifyCertificate(data []byte) (*x509.Certificate,
 		os.Exit(1)
 	}
 
-	if recType != byte(TLSContentTypeHandshake) {
+	if recType != byte(ContentTypeHandshake) {
 		return nil, fmt.Errorf("should return tls handshake type")
 	}
 
@@ -685,7 +685,7 @@ func (serverData *ServerData) verifyCertificate(data []byte) (*x509.Certificate,
 		return nil, fmt.Errorf("version should be ssl 3.0")
 	}
 
-	if handshakeType != byte(TLSHandshakeMessageCertificate) {
+	if handshakeType != byte(HandshakeMessageCertificate) {
 		return nil, fmt.Errorf("Handshake type should be server hello")
 	}
 
@@ -694,22 +694,23 @@ func (serverData *ServerData) verifyCertificate(data []byte) (*x509.Certificate,
 	return cert, nil
 }
 
-func startServer(params *global.Params) net.Listener {
-	var wg sync.WaitGroup
+func startServer(cert *HttpServerCertParam) *HttpServer {
 
-	server := global.Server{
-		Wg: &wg,
+	server, err := CreateServer(
+		WithAddress(Address, Port),
+		WithCertificate(cert),
+	)
+
+	if err != nil {
+		fmt.Printf("cant start the server, err: %v", err)
+		os.Exit(1)
 	}
 
-	wg.Add(1)
+	return server
+}
 
-	go func() {
-		StartHttpServer(params, &server)
-	}()
-
-	wg.Wait()
-
-	return server.Conn
+func StopServer(server HttpServer) {
+	server.CloseHttpServer()
 }
 
 func getOpenSslDir() string {
@@ -723,11 +724,12 @@ func getOpenSslDir() string {
 }
 
 func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
-	serverConn := startServer(nil)
+	server := startServer(nil)
+	fmt.Println("hello")
+	fmt.Println(server)
+	defer StopServer(*server)
 
-	defer serverConn.Close()
-
-	conn, err := net.Dial("tcp", "127.0.0.1:4221")
+	conn, err := net.Dial("tcp", Address+":"+Port)
 
 	if err != nil {
 		t.Errorf("problem connecting to server, err:%v", err)
@@ -735,7 +737,7 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 
 	serverData := &ServerData{
 		ClientRandom: generateRandBytes(32),
-		SSLVersion:   []byte{3, 0},
+		Version:      []byte{3, 0},
 		CipherDef: cipher.CipherDef{
 			Spec: cipher.CipherSpec{
 				HashAlgorithm:       cipher.HashAlgorithmSHA,
@@ -848,11 +850,11 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 
 	params := generateRsaCert(false)
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
-	conn, err := net.Dial("tcp", "127.0.0.1:4221")
+	conn, err := net.Dial("tcp", Address+":"+Port)
 
 	if err != nil {
 		t.Errorf("problem connecting to server, err:%v", err)
@@ -860,7 +862,7 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 
 	serverData := &ServerData{
 		ClientRandom: generateRandBytes(32),
-		SSLVersion:   []byte{3, 0},
+		Version:      []byte{3, 0},
 		CipherDef: cipher.CipherDef{
 			Spec: cipher.CipherSpec{
 				HashAlgorithm:       cipher.HashAlgorithmSHA,
@@ -871,7 +873,7 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
 				SignatureAlgorithm:  cipher.SignatureAlgorithmRSA,
 			},
-			CipherSuite: uint16(cipher.TLS_CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA),
+			CipherSuite: uint16(cipher.CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA),
 		},
 		ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
 	}
@@ -982,11 +984,11 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
 	params := generateRsaCert(false)
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
-	conn, err := net.Dial("tcp", "127.0.0.1:4221")
+	conn, err := net.Dial("tcp", Address+":"+Port)
 
 	if err != nil {
 		t.Errorf("problem connecting to server, err:%v", err)
@@ -994,7 +996,7 @@ func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
 
 	serverData := &ServerData{
 		ClientRandom: generateRandBytes(32),
-		SSLVersion:   []byte{3, 0},
+		Version:      []byte{3, 0},
 		CipherDef: cipher.CipherDef{
 			Spec: cipher.CipherSpec{
 				HashAlgorithm:       cipher.HashAlgorithmSHA,
@@ -1005,12 +1007,12 @@ func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
 				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
 				SignatureAlgorithm:  cipher.SignatureAlgorithmRSA,
 			},
-			CipherSuite: uint16(cipher.TLS_CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA),
+			CipherSuite: uint16(cipher.CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA),
 		},
 		ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
 	}
 
-	_, err = serverData.ParseCertificate(params.CertPath, params.KeyPath)
+	_, err = serverData.parseCertificate(params.CertPath, params.KeyPath)
 
 	if err != nil {
 		t.Errorf("\n cant parse ceritifcate, err: %v", err)
@@ -1127,11 +1129,11 @@ func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
 func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 	params := generateDSsCert()
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
-	conn, err := net.Dial("tcp", "127.0.0.1:4221")
+	conn, err := net.Dial("tcp", Address+":"+Port)
 
 	if err != nil {
 		t.Errorf("problem connecting to server, err:%v", err)
@@ -1139,7 +1141,7 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 
 	serverData := &ServerData{
 		ClientRandom: generateRandBytes(32),
-		SSLVersion:   []byte{3, 0},
+		Version:      []byte{3, 0},
 		CipherDef: cipher.CipherDef{
 			Spec: cipher.CipherSpec{
 				HashAlgorithm:       cipher.HashAlgorithmSHA,
@@ -1150,7 +1152,7 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
 				SignatureAlgorithm:  cipher.SignatureAlgorithmDSA,
 			},
-			CipherSuite: uint16(cipher.TLS_CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA),
+			CipherSuite: uint16(cipher.CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA),
 		},
 		ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
 	}
@@ -1257,7 +1259,7 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 }
 
 func runOpensslCommand(cipher string) error {
-	cmd := exec.Command("./openssl", "s_client", "-connect", "127.0.0.1:4221", "-ssl3", "-cipher", cipher, "-reconnect")
+	cmd := exec.Command("./openssl", "s_client", "-connect", Address+":"+Port, "-ssl3", "-cipher", cipher, "-reconnect")
 
 	cmd.Dir = getOpenSslDir()
 
@@ -1280,9 +1282,9 @@ func runOpensslCommand(cipher string) error {
 func TestHandshakeOpenSSL_ADH_DES_CBC3_SHA(t *testing.T) {
 	params := generateRsaCert(false)
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("ADH-DES-CBC3-SHA"); err != nil {
 		t.Error(err)
@@ -1292,9 +1294,9 @@ func TestHandshakeOpenSSL_ADH_DES_CBC3_SHA(t *testing.T) {
 func TestHandshakeOpenSSL_ADH_DES_CBC_SHA(t *testing.T) {
 	params := generateRsaCert(false)
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("ADH-DES-CBC-SHA"); err != nil {
 		t.Error(err)
@@ -1305,9 +1307,9 @@ func TestHandshakeOpenSSL_ADH_DES_CBC_SHA(t *testing.T) {
 func TestHandshakeOpenSSL_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 	params := generateRsaCert(false)
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("EDH-RSA-DES-CBC3-SHA"); err != nil {
 		t.Error(err)
@@ -1317,9 +1319,9 @@ func TestHandshakeOpenSSL_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 func TestHandshakeOpenSSL_EDH_RSA_DES_CBC_SHA(t *testing.T) {
 	params := generateRsaCert(false)
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("EDH-RSA-DES-CBC-SHA"); err != nil {
 		t.Error(err)
@@ -1329,9 +1331,9 @@ func TestHandshakeOpenSSL_EDH_RSA_DES_CBC_SHA(t *testing.T) {
 func TestHandshakeOpenSSL_DES_CBC3_SHA(t *testing.T) {
 	params := generateRsaCert(false)
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("DES-CBC3-SHA"); err != nil {
 		t.Error(err)
@@ -1342,9 +1344,9 @@ func TestHandshakeOpenSSL_DES_CBC3_SHA(t *testing.T) {
 func TestHandshakeOpenSSL_DES_CBC_SHA(t *testing.T) {
 	params := generateRsaCert(false)
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("DES-CBC-SHA"); err != nil {
 		t.Error(err)
@@ -1355,9 +1357,9 @@ func TestHandshakeOpenSSL_DES_CBC_SHA(t *testing.T) {
 func TestHandshakeOpenSSL_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 	params := generateDSsCert()
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("EDH-DSS-DES-CBC3-SHA"); err != nil {
 		t.Error(err)
@@ -1367,9 +1369,9 @@ func TestHandshakeOpenSSL_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 func TestHandshakeOpenSSL_EDH_DSS_DES_CBC_SHA(t *testing.T) {
 	params := generateDSsCert()
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("EDH-DSS-DES-CBC-SHA"); err != nil {
 		t.Error(err)
@@ -1379,9 +1381,9 @@ func TestHandshakeOpenSSL_EDH_DSS_DES_CBC_SHA(t *testing.T) {
 func TestHandshakeOpenSSL_EXP_EDH_RSA_DES_CBC_SHA(t *testing.T) {
 	params := generateRsaCert(false)
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("EXP-EDH-RSA-DES-CBC-SHA"); err != nil {
 		t.Error(err)
@@ -1392,9 +1394,9 @@ func TestHandshakeOpenSSL_EXP_EDH_RSA_DES_CBC_SHA(t *testing.T) {
 func TestHandshakeOpenSSL_EXP_EDH_DSS_DES_CBC_SHA(t *testing.T) {
 	params := generateDSsCert()
 
-	serverConn := startServer(params)
+	server := startServer(params)
 
-	defer serverConn.Close()
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("EXP-EDH-DSS-DES-CBC-SHA"); err != nil {
 		t.Error(err)
@@ -1405,8 +1407,8 @@ func TestHandshakeOpenSSL_EXP_EDH_DSS_DES_CBC_SHA(t *testing.T) {
 func TestHandshakeOpenSSL_EXP_DES_CBC_SHA(t *testing.T) {
 	params := generateRsaCert(true)
 
-	serverConn := startServer(params)
-	defer serverConn.Close()
+	server := startServer(params)
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("EXP-DES-CBC-SHA"); err != nil {
 		t.Error(err)
@@ -1417,8 +1419,8 @@ func TestHandshakeOpenSSL_EXP_DES_CBC_SHA(t *testing.T) {
 func TestHandshakeOpenSSL_RC4_SHA(t *testing.T) {
 	params := generateRsaCert(true)
 
-	serverConn := startServer(params)
-	defer serverConn.Close()
+	server := startServer(params)
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("RC4-SHA"); err != nil {
 		t.Error(err)
@@ -1429,8 +1431,8 @@ func TestHandshakeOpenSSL_RC4_SHA(t *testing.T) {
 func TestHandshakeOpenSSL_RC4_MD5(t *testing.T) {
 	params := generateRsaCert(true)
 
-	serverConn := startServer(params)
-	defer serverConn.Close()
+	server := startServer(params)
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("RC4-MD5"); err != nil {
 		t.Error(err)
@@ -1441,8 +1443,8 @@ func TestHandshakeOpenSSL_RC4_MD5(t *testing.T) {
 func TestHandshakeOpenSSL_EXP_RC4_MD5(t *testing.T) {
 	params := generateRsaCert(true)
 
-	serverConn := startServer(params)
-	defer serverConn.Close()
+	server := startServer(params)
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("EXP-RC4-MD5"); err != nil {
 		t.Error(err)
@@ -1453,8 +1455,8 @@ func TestHandshakeOpenSSL_EXP_RC4_MD5(t *testing.T) {
 func TestHandshakeOpenSSL_ADH_RC4_MD5(t *testing.T) {
 	params := generateRsaCert(true)
 
-	serverConn := startServer(params)
-	defer serverConn.Close()
+	server := startServer(params)
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("ADH-RC4-MD5"); err != nil {
 		t.Error(err)
@@ -1465,8 +1467,8 @@ func TestHandshakeOpenSSL_ADH_RC4_MD5(t *testing.T) {
 func TestHandshakeOpenSSL_EXP_ADH_RC4_MD5(t *testing.T) {
 	params := generateRsaCert(true)
 
-	serverConn := startServer(params)
-	defer serverConn.Close()
+	server := startServer(params)
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("EXP-ADH-RC4-MD5"); err != nil {
 		t.Error(err)
@@ -1476,8 +1478,8 @@ func TestHandshakeOpenSSL_EXP_ADH_RC4_MD5(t *testing.T) {
 func TestHandshakeOpenSSL_EXP_RC2_CBC_MD5(t *testing.T) {
 	params := generateRsaCert(true)
 
-	serverConn := startServer(params)
-	defer serverConn.Close()
+	server := startServer(params)
+	defer StopServer(*server)
 
 	if err := runOpensslCommand("EXP-RC2-CBC-MD5"); err != nil {
 		t.Error(err)

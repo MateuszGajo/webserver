@@ -10,9 +10,9 @@ import (
 func TestPartialMsg(t *testing.T) {
 
 	serverData := ServerData{
-		SSLVersion: []byte{3, 0},
+		Version: []byte{3, 0},
 	}
-	msg := []byte{byte(TLSContentTypeHandshake), 3, 0}
+	msg := []byte{byte(ContentTypeHandshake), 3, 0}
 	output, partialOut, _ := serverData.Parser(msg)
 
 	if len(output) > 1 {
@@ -27,9 +27,9 @@ func TestPartialMsg(t *testing.T) {
 func TestPartialLongMsg(t *testing.T) {
 
 	serverData := ServerData{
-		SSLVersion: []byte{3, 0},
+		Version: []byte{3, 0},
 	}
-	msg := []byte{byte(TLSContentTypeHandshake), 3, 0, 0, 5, 1, 2}
+	msg := []byte{byte(ContentTypeHandshake), 3, 0, 0, 5, 1, 2}
 	output, partialOut, _ := serverData.Parser(msg)
 
 	if len(output) > 1 {
@@ -43,10 +43,10 @@ func TestPartialLongMsg(t *testing.T) {
 
 func TestFullAndPartialMsg(t *testing.T) {
 	serverData := ServerData{
-		SSLVersion: []byte{3, 0},
+		Version: []byte{3, 0},
 	}
-	fullMsg := []byte{byte(TLSContentTypeHandshake), 3, 0, 0, 2, 1, 0}
-	partialMsg := []byte{byte(TLSContentTypeHandshake), 3, 0}
+	fullMsg := []byte{byte(ContentTypeHandshake), 3, 0, 0, 2, 1, 0}
+	partialMsg := []byte{byte(ContentTypeHandshake), 3, 0}
 	msg := append(fullMsg, partialMsg...)
 
 	output, partialOut, _ := serverData.Parser(msg)
@@ -62,7 +62,7 @@ func TestFullAndPartialMsg(t *testing.T) {
 
 func TestErrorWrongContentType(t *testing.T) {
 	serverData := ServerData{
-		SSLVersion: []byte{3, 0},
+		Version: []byte{3, 0},
 	}
 	msg := []byte{12, 3, 0, 0, 2, 1, 0}
 
@@ -84,10 +84,10 @@ func TestErrorWrongContentType(t *testing.T) {
 
 func TestParseMultipleMsg(t *testing.T) {
 	serverData := ServerData{
-		SSLVersion: []byte{3, 0},
+		Version: []byte{3, 0},
 	}
-	fullMsgOne := []byte{byte(TLSContentTypeHandshake), 3, 0, 0, 2, 1, 0}
-	fullMsgTwo := []byte{byte(TLSContentTypeHandshake), 3, 0, 0, 2, 4, 5}
+	fullMsgOne := []byte{byte(ContentTypeHandshake), 3, 0, 0, 2, 1, 0}
+	fullMsgTwo := []byte{byte(ContentTypeHandshake), 3, 0, 0, 2, 4, 5}
 	msg := append(fullMsgOne, fullMsgTwo...)
 
 	output, _, _ := serverData.Parser(msg)

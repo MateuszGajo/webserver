@@ -1,27 +1,19 @@
 package handshake
 
 import (
-	"crypto/dsa"
 	"crypto/md5"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha1"
-	"crypto/x509"
-	"encoding/asn1"
 	"encoding/binary"
-	"encoding/pem"
 	"errors"
 	"fmt"
+	"handshakeServer/cipher"
+	"handshakeServer/helpers"
 	"hash"
-	"math/big"
 	"net"
-	"os"
 	"reflect"
 	"sync"
 	"time"
-	s3_cipher "webserver/cipher"
-	"webserver/global"
-	"webserver/helpers"
 )
 
 // SSL 3.0
@@ -115,70 +107,70 @@ import (
 // clients send a hello, using session id, server checks its session cache for a match if it found server is willing to re esatblished connection under the specified ssession state, it will send server hello with same sesion id. At this point client and sever need to change cipher spec.
 // If session if is not found, sever generated a new session id and the ssl client and server perform a full handskae.
 
-type TlSContentType byte
+type ContentType byte
 
 const (
-	TLSContentTypeApplicationData  TlSContentType = 23
-	TLSContentTypeHandshake        TlSContentType = 22
-	TLSContentTypeAlert            TlSContentType = 21
-	TLSContentTypeChangeCipherSpec TlSContentType = 20
+	ContentTypeApplicationData  ContentType = 23
+	ContentTypeHandshake        ContentType = 22
+	ContentTypeAlert            ContentType = 21
+	ContentTypeChangeCipherSpec ContentType = 20
 	// to help avoid pipeline stalls, changeciperspec is independet ssl protocol type
 	// The CCS message being independent allows it to be processed out of sync with the strict sequence of handshake messages. While the rest of the handshake is being processed, the system can already signal readiness to switch to the new cipher suite, avoiding unnecessary wait times.
 )
 
-type SSLVersion uint16
+type Version uint16
 
 const (
-	SSL30Version SSLVersion = 0x0300
+	SSL30Version Version = 0x0300
 )
 
-type TLSAlertDescription byte
+type AlertDescription byte
 
 const (
-	TLSAlertDescriptionCloseNotify            TLSAlertDescription = 0
-	TLSAlertDescriptionUnexpectedMessage      TLSAlertDescription = 10
-	TLSAlertDescriptionBadRecordMac           TLSAlertDescription = 20
-	TLSAlertDescriptionDecompressionFailure   TLSAlertDescription = 30
-	TLSAlertDescriptionHandshakeFailure       TLSAlertDescription = 40
-	TLSAlertDescriptionNoCertificate          TLSAlertDescription = 41
-	TLSAlertDescriptionBadCertificate         TLSAlertDescription = 42
-	TLSAlertDescriptionUnsupportedCertificate TLSAlertDescription = 43
-	TLSAlertDescriptionCertificateRevoked     TLSAlertDescription = 44
-	TLSAlertDescriptionCertificateExpired     TLSAlertDescription = 45
-	TLSAlertDescriptionCertificateUnknown     TLSAlertDescription = 46
-	TLSAlertDescriptionIllegalParameter       TLSAlertDescription = 47
+	AlertDescriptionCloseNotify            AlertDescription = 0
+	AlertDescriptionUnexpectedMessage      AlertDescription = 10
+	AlertDescriptionBadRecordMac           AlertDescription = 20
+	AlertDescriptionDecompressionFailure   AlertDescription = 30
+	AlertDescriptionHandshakeFailure       AlertDescription = 40
+	AlertDescriptionNoCertificate          AlertDescription = 41
+	AlertDescriptionBadCertificate         AlertDescription = 42
+	AlertDescriptionUnsupportedCertificate AlertDescription = 43
+	AlertDescriptionCertificateRevoked     AlertDescription = 44
+	AlertDescriptionCertificateExpired     AlertDescription = 45
+	AlertDescriptionCertificateUnknown     AlertDescription = 46
+	AlertDescriptionIllegalParameter       AlertDescription = 47
 )
 
 const MASTER_SECRET_LENGTH = 48
 const RANDOM_BYTES_LENGTH = 32
 
-type TlSAlertLevel byte
+type AlertLevel byte
 
 const (
-	TLSAlertLevelwarning TlSAlertLevel = 1
-	TLSAlertLevelfatal   TlSAlertLevel = 2
+	AlertLevelwarning AlertLevel = 1
+	AlertLevelfatal   AlertLevel = 2
 )
 
-type TLSHandshakeMessageType byte
+type HandshakeMessageType byte
 
 const (
-	TLSHandshakeMessageHelloRequest TLSHandshakeMessageType = 0
+	HandshakeMessageHelloRequest HandshakeMessageType = 0
 	// server send a request to start new handshake process, allowing session renewals and paramters update
-	TLSHandshakeMessageClientHello       TLSHandshakeMessageType = 1
-	TLSHandshakeMessageServerHello       TLSHandshakeMessageType = 2
-	TLSHandshakeMessageCertificate       TLSHandshakeMessageType = 11
-	TLSHandshakeMessageServerKeyExchange TLSHandshakeMessageType = 12
-	TLSHandshakeMessageCerificateRequest TLSHandshakeMessageType = 13
-	TLSHandshakeMessageServerHelloDone   TLSHandshakeMessageType = 14
-	TLSHandshakeMessageCertificateVerify TLSHandshakeMessageType = 15
-	TLSHandshakeMessageClientKeyExchange TLSHandshakeMessageType = 16
-	TLSHandshakeMessageFinished          TLSHandshakeMessageType = 20
+	HandshakeMessageClientHello       HandshakeMessageType = 1
+	HandshakeMessageServerHello       HandshakeMessageType = 2
+	HandshakeMessageCertificate       HandshakeMessageType = 11
+	HandshakeMessageServerKeyExchange HandshakeMessageType = 12
+	HandshakeMessageCerificateRequest HandshakeMessageType = 13
+	HandshakeMessageServerHelloDone   HandshakeMessageType = 14
+	HandshakeMessageCertificateVerify HandshakeMessageType = 15
+	HandshakeMessageClientKeyExchange HandshakeMessageType = 16
+	HandshakeMessageFinished          HandshakeMessageType = 20
 )
 
-type TLSCipherSpec byte
+type CipherSpec byte
 
 const (
-	TLSCipherSpecDefault TLSCipherSpec = 1
+	CipherSpecDefault CipherSpec = 1
 )
 
 type Sender uint64
@@ -209,278 +201,16 @@ var pad2 = []byte{
 
 // AES advanced encryption standard, block cipher, symmetric key, aes is faster
 
-type ServerData struct {
-	IsClientEncrypted bool
-	IsServerEncrypted bool
-	PreMasterSecret   []byte
-	ClientRandom      []byte
-	ServerRandom      []byte
-	SSLVersion        []byte
-	HandshakeMessages [][]byte
-	MasterKey         []byte
-	CipherDef         s3_cipher.CipherDef
-	ServerSeqNum      []byte
-	ClientSeqNum      []byte
-	conn              net.Conn
-	wBuff             []byte
-	cert              []byte
-	session           []byte
-	reuseSession      bool
-}
-
-type SafeSession struct {
+type Session struct {
 	mu   sync.Mutex
 	data map[string]*ServerData
 }
 
-var sessions = SafeSession{
+var sessions = Session{
 	data: make(map[string]*ServerData),
 }
 
-func (serverData *ServerData) loadCert(certPath, keyPath string) error {
-
-	certBytes, err := serverData.ParseCertificate(certPath, keyPath)
-
-	if err != nil {
-		return fmt.Errorf("problem passing certificate, err:%v", err)
-	}
-
-	serverData.cert = certBytes
-
-	return nil
-
-}
-
-// parse privaty key in PCKS doesnt work for dsa :) `AGL suggested that nobody uses DSA anymore, so this can be closed.` https://github.com/golang/go/issues/6868
-func ParseDSAPrivateKeyPCKS8(der []byte) (*dsa.PrivateKey, error) {
-
-	type Params struct {
-		P, Q, G *big.Int
-	}
-
-	type Algorithm struct {
-		Algorithm any
-		Structt   Params
-	}
-
-	var k struct {
-		Version    int
-		Algorithm  Algorithm
-		PrivateKey []byte
-	}
-
-	_, err := asn1.Unmarshal(der, &k)
-
-	if err != nil {
-		return nil, fmt.Errorf("\n error parsing, err:%v", err)
-	}
-	var value *big.Int
-
-	// Unmarshal the ASN.1-encoded data
-	_, err = asn1.Unmarshal(k.PrivateKey, &value)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshaling ASN.1: %v", err)
-	}
-
-	// Compute the public key (Y = G^X mod P)
-	publicKey := new(big.Int).Exp(k.Algorithm.Structt.G, value, k.Algorithm.Structt.P)
-
-	if err != nil {
-		return nil, fmt.Errorf("error parsing da pcks8, err: %v", err)
-	}
-
-	dsaKey := &dsa.PrivateKey{
-		PublicKey: dsa.PublicKey{
-			Parameters: dsa.Parameters{
-				P: k.Algorithm.Structt.P,
-				Q: k.Algorithm.Structt.Q,
-				G: k.Algorithm.Structt.G,
-			},
-			Y: publicKey,
-		},
-		X: value,
-	}
-
-	return dsaKey, nil
-}
-
-func ParseDSAPrivateKey(der []byte) (*dsa.PrivateKey, error) {
-
-	privkey, err := ParseDSAPrivateKeyPCKS8(der)
-	if err == nil {
-		return privkey, nil
-	}
-
-	var k struct {
-		Version int
-		P       *big.Int
-		Q       *big.Int
-		G       *big.Int
-		Pub     *big.Int
-		Priv    *big.Int
-	}
-
-	rest, err := asn1.Unmarshal(der, &k)
-
-	if err != nil {
-		return nil, errors.New("ssh: failed to parse DSA key: " + err.Error())
-	}
-	if len(rest) > 0 {
-		return nil, errors.New("ssh: garbage after DSA key")
-	}
-
-	dsaKey := &dsa.PrivateKey{
-		PublicKey: dsa.PublicKey{
-			Parameters: dsa.Parameters{
-				P: k.P,
-				Q: k.Q,
-				G: k.G,
-			},
-			Y: k.Pub,
-		},
-		X: k.Priv,
-	}
-
-	return dsaKey, nil
-}
-
-func (serverData *ServerData) ParseCertificate(certFile, keyFile string) ([]byte, error) {
-	certPEM, err := os.ReadFile(certFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read certificate file: %v", err)
-	}
-
-	keyPEM, err := os.ReadFile(keyFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read key file: %v", err)
-	}
-
-	keyBlock, _ := pem.Decode(keyPEM)
-	if keyBlock == nil {
-		return nil, fmt.Errorf("failed to decode PEM block containing private key")
-	}
-	keyBlockBytes := keyBlock.Bytes
-
-	certBlock, _ := pem.Decode(certPEM)
-	if certBlock == nil {
-		return nil, fmt.Errorf("failed to decode PEM block containing certificate")
-	}
-
-	cert, err := x509.ParseCertificate(certBlock.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse certificate: %v", err)
-	}
-
-	if cert.PublicKeyAlgorithm == x509.DSA {
-		dsaPrivate, err := ParseDSAPrivateKey(keyBlockBytes)
-
-		if err != nil {
-		} else {
-			serverData.CipherDef.Dsa.PrivateKey = dsaPrivate
-		}
-	} else if cert.PublicKeyAlgorithm == x509.RSA {
-		privateKey, err := x509.ParsePKCS8PrivateKey(keyBlockBytes)
-		if err != nil {
-			privateKey, err = x509.ParsePKCS1PrivateKey(keyBlockBytes)
-			if err != nil {
-				privateKey, err = x509.ParseECPrivateKey(keyBlockBytes)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse private key: %v", err)
-				}
-			}
-		}
-
-		rsaKey, ok := privateKey.(*rsa.PrivateKey)
-		if ok {
-			serverData.CipherDef.Rsa.PrivateKey = rsaKey
-		} else {
-			return nil, fmt.Errorf("can't convert to rsa private key")
-		}
-	} else {
-		return nil, fmt.Errorf("\n unkown certificate with pub cert algorithm: %v", cert.PublicKeyAlgorithm)
-	}
-
-	rawBytes := cert.Raw
-	return rawBytes, nil
-}
-
-func StartHttpServer(params *global.Params, server *global.Server) {
-
-	listener, err := net.Listen("tcp", "127.0.0.1:4221")
-
-	if err != nil {
-		fmt.Println("errr has occured trying while trying to connect")
-		fmt.Println(err)
-	}
-	server.Wg.Done()
-	server.Conn = listener
-	for {
-		sslVersionBinary := make([]byte, 2)
-		binary.BigEndian.PutUint16(sslVersionBinary, uint16(SSL30Version))
-
-		serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, SSLVersion: sslVersionBinary, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: s3_cipher.CipherDef{}}
-
-		if (params) != nil {
-
-			err := serverData.loadCert(params.CertPath, params.KeyPath)
-
-			if err != nil {
-				fmt.Printf("\n problem loading certificate, err :%v", err)
-				break
-			}
-		}
-		conn, err := listener.Accept()
-
-		if err != nil {
-			fmt.Printf("errr has occured trying while trying to connect, err :%v", err)
-			break
-		}
-
-		serverData.conn = conn
-
-		go HandleConnection(conn, &serverData)
-	}
-}
-
-func HandleConnection(conn net.Conn, serverData *ServerData) {
-	defer conn.Close()
-
-	bufInit := []byte{}
-
-Loop:
-	for {
-
-		buff := make([]byte, 1024)
-		n, err := conn.Read(buff)
-		if err != nil {
-			fmt.Println("Error reading handshake data:", err)
-			break Loop
-		}
-
-		clientHello := buff[:n]
-
-		input := append(bufInit, clientHello...)
-		msgs, partial, err := serverData.Parser(input)
-		bufInit = partial
-
-		if err != nil {
-			fmt.Printf("\n parser error: %v", err)
-			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
-
-		}
-
-		for _, msg := range msgs {
-			err := handleMessage(msg, conn, serverData)
-			if err != nil {
-				fmt.Println(err)
-				break Loop
-			}
-		}
-	}
-
-}
-
-func (serverData *ServerData) sendAlertMsg(level TlSAlertLevel, description TLSAlertDescription) {
+func (serverData *ServerData) sendAlertMsg(level AlertLevel, description AlertDescription) {
 
 	alertMsg := []byte{byte(level)}
 	alertMsg = append(alertMsg, byte(description))
@@ -493,11 +223,11 @@ func (serverData *ServerData) sendAlertMsg(level TlSAlertLevel, description TLSA
 		fmt.Printf("\n problem sending alert: %v", err)
 	}
 
-	handleAlert(alertMsg, serverData.conn)
+	serverData.handleAlert(alertMsg)
 
 }
 
-func generate_finished_handshake_mac(hashingAlgorithm hash.Hash, masterSecret, sender []byte, handshakeMessages [][]byte) []byte {
+func (serverData *ServerData) generate_finished_handshake_mac(hashingAlgorithm hash.Hash, sender []byte, handshakeMessages [][]byte) []byte {
 	n := hashingAlgorithm.Size()
 	// Legacy thing with fixed number of 48 bytes
 	npad := (48 / n) * n
@@ -513,13 +243,13 @@ func generate_finished_handshake_mac(hashingAlgorithm hash.Hash, masterSecret, s
 
 	hashingAlgorithm.Write(allHandskaedMessageCombined)
 	hashingAlgorithm.Write(sender)
-	hashingAlgorithm.Write(masterSecret)
+	hashingAlgorithm.Write(serverData.MasterKey)
 	hashingAlgorithm.Write(pad1Arr)
 
 	tmp := hashingAlgorithm.Sum(nil)
 	hashingAlgorithm.Reset()
 
-	hashingAlgorithm.Write(masterSecret)
+	hashingAlgorithm.Write(serverData.MasterKey)
 	hashingAlgorithm.Write(pad2Arr)
 	hashingAlgorithm.Write(tmp)
 
@@ -572,10 +302,10 @@ func (serverData *ServerData) generateStreamCipher(dataCompressedType, sslCompre
 	var hashFunc hash.Hash
 
 	switch serverData.CipherDef.Spec.HashAlgorithm {
-	case s3_cipher.HashAlgorithmMD5:
+	case cipher.HashAlgorithmMD5:
 		nPad = 48
 		hashFunc = md5.New()
-	case s3_cipher.HashAlgorithmSHA:
+	case cipher.HashAlgorithmSHA:
 		nPad = 40
 		hashFunc = sha1.New()
 	default:
@@ -612,14 +342,14 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) err
 		decryptedClientData, err := serverData.CipherDef.DecryptMessage(clientData[5:], serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
 
 		if err != nil {
-			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionBadRecordMac)
+			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionBadRecordMac)
 			return fmt.Errorf("\n Decryption failed: %v", err)
 		}
 
 		dataWithoutMac, err := serverData.verifyMac(contentType, decryptedClientData)
 
 		if err != nil {
-			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionBadRecordMac)
+			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionBadRecordMac)
 			return fmt.Errorf("\n eror with verify mac, err: %v", err)
 		}
 
@@ -627,21 +357,21 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) err
 
 	}
 
-	if contentType == byte(TLSContentTypeHandshake) {
+	if contentType == byte(ContentTypeHandshake) {
 
 		handshakeLength := int32(dataContent[1])<<16 | int32(dataContent[2])<<8 | int32(dataContent[3])
 		serverData.HandshakeMessages = append(serverData.HandshakeMessages, dataContent[:handshakeLength+4])
 		err = serverData.handleHandshake(dataContent)
 
-	} else if contentType == byte(TLSContentTypeAlert) {
-		handleAlert(dataContent, conn)
-	} else if contentType == byte(TLSContentTypeChangeCipherSpec) {
+	} else if contentType == byte(ContentTypeAlert) {
+		serverData.handleAlert(dataContent)
+	} else if contentType == byte(ContentTypeChangeCipherSpec) {
 		serverData.handleHandshakeChangeCipherSpec(dataContent)
 
-	} else if contentType == byte(TLSContentTypeApplicationData) {
+	} else if contentType == byte(ContentTypeApplicationData) {
 		HttpHandler(dataContent)
 	} else {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("\n Unknown record layer type:" + string(contentType))
 	}
 	return err
@@ -651,9 +381,9 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) err
 func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) ([]byte, error) {
 	var macSize int
 	switch serverData.CipherDef.Spec.HashAlgorithm {
-	case s3_cipher.HashAlgorithmMD5:
+	case cipher.HashAlgorithmMD5:
 		macSize = md5.New().Size()
-	case s3_cipher.HashAlgorithmSHA:
+	case cipher.HashAlgorithmSHA:
 		macSize = sha1.New().Size()
 	default:
 		panic("wrong algorithm used can't use: " + serverData.CipherDef.Spec.HashAlgorithm)
@@ -679,33 +409,33 @@ func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) ([
 	return dataSent, nil
 }
 
-func handleAlert(contentData []byte, conn net.Conn) {
+func (serverData *ServerData) handleAlert(contentData []byte) {
 	// majorVersion := clientHello[1]
 	// minorVersion := clientHello[2]
 	// length := clientHello[3:4]
-	alertLevel := TlSAlertLevel(contentData[0])
+	alertLevel := AlertLevel(contentData[0])
 	closeConn := false
 
-	if alertLevel == TLSAlertLevelfatal {
+	if alertLevel == AlertLevelfatal {
 		closeConn = true
 	}
 
-	alertDescription := TLSAlertDescription(contentData[1])
+	alertDescription := AlertDescription(contentData[1])
 
 	switch alertDescription {
-	case TLSAlertDescriptionCloseNotify:
+	case AlertDescriptionCloseNotify:
 		// The connection is closing or has been closed gracefully, no action needed
 		fmt.Println("Closing connection")
 		closeConn = true
-	case TLSAlertDescriptionUnexpectedMessage:
+	case AlertDescriptionUnexpectedMessage:
 		// Do Retry, bad message recive, long term problem can indicate protocol mismatch(client expecting e.g tls 1.2 and server sending 1.3), incorrect squence or error in
 		fmt.Print("Unexpected message, Retry connectin again, if problem persist, check configuration")
 
-	case TLSAlertDescriptionBadRecordMac:
+	case AlertDescriptionBadRecordMac:
 		// A message auhentication code (MAC) check failed, check your connection, can indicate server problem or an attack
 		// Always fatal
 		fmt.Print("MAC failed, check your connection")
-	case TLSAlertDescriptionDecompressionFailure:
+	case AlertDescriptionDecompressionFailure:
 		// The compression function recived wrong input, mostly indicated corrupted message, decompression methods such as lz77, works by sling a window over the input data to idientify repeted sequences. It replaces these sequences with references to earlier occurances of the same sequence.
 		// Lookahed bufer is a smaller buffer within the window that scans for the longer match of the current input string.
 		// Match an literal: if match is found it is encoded a tuple (distance, length)
@@ -718,31 +448,31 @@ func handleAlert(contentData []byte, conn net.Conn) {
 		// abrac	adabra		(4, 1) (back 4, length 1)
 		// abracad	abra		(7, 4) (back 7, length 4)
 		fmt.Print("Can't decompress data, check for input corupteness")
-	case TLSAlertDescriptionHandshakeFailure:
+	case AlertDescriptionHandshakeFailure:
 		// Handshake process failed, ensure that server and browser supports required protocol and ciphers, may indicate problem with server configuration
 		// Always fatal
 		fmt.Print("Handshake failure, make sure choose procol and ciphers are supported by both parties")
-	case TLSAlertDescriptionNoCertificate:
+	case AlertDescriptionNoCertificate:
 		// No certificate was provided by the peer
 		// Optional field
 		fmt.Print("No certificate provided")
-	case TLSAlertDescriptionBadCertificate:
+	case AlertDescriptionBadCertificate:
 		// Bad certificate
 		fmt.Print("Make sure that provided cerificate is valid")
-	case TLSAlertDescriptionUnsupportedCertificate:
+	case AlertDescriptionUnsupportedCertificate:
 		// The certificate is unsported:
 		// 1. Invalid certificate type, e.g server can only accept x5.09 certificated
 		// 2. Unrecgonized cerificate authority
 		// 3. Certificate algorithm issue, its not supported by peers
 		// 4. Certificate version its not supported
 		fmt.Print("Unsported certificated, make sure both parties support the type, issuer, version and both known authority")
-	case TLSAlertDescriptionCertificateRevoked:
+	case AlertDescriptionCertificateRevoked:
 		// Cerificate was revoke
 		fmt.Print("Certificate revoked")
-	case TLSAlertDescriptionCertificateExpired:
+	case AlertDescriptionCertificateExpired:
 		// Cerificated expired
 		fmt.Print("Certificate expiered")
-	case TLSAlertDescriptionCertificateUnknown:
+	case AlertDescriptionCertificateUnknown:
 		// 1. Unknown certificate
 		// 2. Untrusted CA
 		// 3. Incomplete Certificate chain, presented certifiacted does not include a complate chain to trsuted root CA
@@ -751,7 +481,7 @@ func handleAlert(contentData []byte, conn net.Conn) {
 		// 6. Mimstached purpose, doesnt have appropriate extention
 		// 7. Expired trust store
 		fmt.Print("Unknown certificate, check CA authority, trust store, extenstion compability or maybe its coruppted data")
-	case TLSAlertDescriptionIllegalParameter:
+	case AlertDescriptionIllegalParameter:
 		// Paramters not allowed or recognized:
 		// 1. Invalid cipher suite, not implmented by one of the parties
 		// 2. Not supported tls version
@@ -764,7 +494,7 @@ func handleAlert(contentData []byte, conn net.Conn) {
 	}
 
 	if closeConn {
-		conn.Close()
+		serverData.conn.Close()
 		return
 	}
 }
@@ -773,29 +503,29 @@ func (serverData *ServerData) loadCertificate() error {
 
 	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(len(serverData.cert) + 3 + 3)
 	if err != nil {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return errors.New("problem converting record layer length to big endina")
 	}
 
 	certLengthByte, err := helpers.IntTo3BytesBigEndian(len(serverData.cert) + 3)
 	if err != nil {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return errors.New("problem converting certs length to big endian")
 	}
 
 	certLengthByteSingle, err := helpers.IntTo3BytesBigEndian(len(serverData.cert))
 	if err != nil {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return errors.New("problem converting cert length to big endian")
 	}
 
-	serverCertificate := []byte{byte(TLSHandshakeMessageCertificate)}
+	serverCertificate := []byte{byte(HandshakeMessageCertificate)}
 	serverCertificate = append(serverCertificate, handshakeLengthByte...)
 	serverCertificate = append(serverCertificate, certLengthByte...)
 	serverCertificate = append(serverCertificate, certLengthByteSingle...)
 	serverCertificate = append(serverCertificate, serverData.cert...)
 
-	err = serverData.BuffSendData(TLSContentTypeHandshake, serverCertificate)
+	err = serverData.BuffSendData(ContentTypeHandshake, serverCertificate)
 
 	return err
 
@@ -812,14 +542,14 @@ func (serverData *ServerData) sendData(data []byte) (n int, err error) {
 	return n, err
 }
 
-func (serverData *ServerData) BuffSendData(contentData TlSContentType, data []byte) error {
+func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte) error {
 
-	if contentData == TLSContentTypeHandshake {
+	if contentData == ContentTypeHandshake {
 		serverData.HandshakeMessages = append(serverData.HandshakeMessages, data)
 	}
 
 	msg := []byte{byte(contentData)}
-	msg = append(msg, serverData.SSLVersion...)
+	msg = append(msg, serverData.Version...)
 
 	if serverData.IsServerEncrypted {
 
@@ -832,7 +562,7 @@ func (serverData *ServerData) BuffSendData(contentData TlSContentType, data []by
 		encryptedMsg, err := serverData.CipherDef.EncryptMessage(dataWithMac, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
 
 		if err != nil {
-			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionBadRecordMac)
+			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionBadRecordMac)
 			return err
 		}
 
@@ -861,9 +591,9 @@ func (serverData *ServerData) BuffSendData(contentData TlSContentType, data []by
 
 func (serverData *ServerData) handleHandshake(contentData []byte) error {
 
-	handshakeMessageType := TLSHandshakeMessageType(contentData[0])
+	handshakeMessageType := HandshakeMessageType(contentData[0])
 	var err error
-	if handshakeMessageType == TLSHandshakeMessageClientHello {
+	if handshakeMessageType == HandshakeMessageClientHello {
 		if err = serverData.handleHandshakeClientHello(contentData); err != nil {
 			return fmt.Errorf("\n Problem handling client hello: %v", err)
 		}
@@ -887,19 +617,19 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 			return err
 		}
 
-		if serverData.CipherDef.Spec.SignatureAlgorithm != s3_cipher.SignatureAlgorithmAnonymous {
+		if serverData.CipherDef.Spec.SignatureAlgorithm != cipher.SignatureAlgorithmAnonymous {
 			if err = serverData.loadCertificate(); err != nil {
 				return fmt.Errorf("\n problem loading certificate: %V", err)
 			}
 		}
 
 		// The server key exchange message is sent by the server if it has no cetificate, has a certificate used for siging (e.g. dss certificate, signing-only rsa)
-		// if serverData.CipherDef.Spec.SignatureAlgorithm == s3_cipher.SignatureAlgorithmAnonymous || // No certificate
-		// 	serverData.CipherDef.Spec.SignatureAlgorithm == s3_cipher.SignatureAlgorithmDSA || // das certificate
-		// 	(serverData.CipherDef.Spec.SignatureAlgorithm == s3_cipher.SignatureAlgorithmRSA && // signin only
-		// 		(serverData.CipherDef.Spec.KeyExchange == s3_cipher.KeyExchangeMethodDH))
+		// if serverData.CipherDef.Spec.SignatureAlgorithm == cipher.SignatureAlgorithmAnonymous || // No certificate
+		// 	serverData.CipherDef.Spec.SignatureAlgorithm == cipher.SignatureAlgorithmDSA || // das certificate
+		// 	(serverData.CipherDef.Spec.SignatureAlgorithm == cipher.SignatureAlgorithmRSA && // signin only
+		// 		(serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH))
 		// I think can simply if to just if the key exchange method is DH
-		if serverData.CipherDef.Spec.KeyExchange == s3_cipher.KeyExchangeMethodDH {
+		if serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH {
 			if err = serverData.serverKeyExchange(); err != nil {
 				return fmt.Errorf("\n problem with serverkeyexchange message: %v", err)
 
@@ -913,17 +643,17 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 		// lets do one write with collected few messages, don't send extra network round trips
 		_, err = serverData.sendData(serverData.wBuff)
 		if err != nil {
-			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 			return fmt.Errorf("\n problem sending server hello data, err: %v", err)
 		}
 
-	} else if handshakeMessageType == TLSHandshakeMessageClientKeyExchange {
+	} else if handshakeMessageType == HandshakeMessageClientKeyExchange {
 		// computes ivs, writekeys, macs, don't need to send any message after this
 		if err := serverData.handleHandshakeClientKeyExchange(contentData); err != nil {
-			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 			return fmt.Errorf("\n handshake client key exchange err: %v", err)
 		}
-	} else if handshakeMessageType == TLSHandshakeMessageFinished {
+	} else if handshakeMessageType == HandshakeMessageFinished {
 		if serverData.reuseSession {
 			return nil
 		}
@@ -937,7 +667,7 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 		// We don't combine message here to single route trip as change cipher msg is separate content type, in order to not be stalling
 		_, err := serverData.sendData(serverData.wBuff)
 		if err != nil {
-			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 			return fmt.Errorf("\n problem sending change cipher msg: %v", err)
 		}
 
@@ -948,7 +678,7 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 		_, err = serverData.sendData(serverData.wBuff)
 
 		if err != nil {
-			serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 			return fmt.Errorf("\n problem sending server finished msgs: %v", err)
 		}
 		sessions.mu.Lock()
@@ -979,27 +709,27 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 	contentLength := int(contentData[1])<<16 | int(contentData[2])<<8 | int(contentData[3])
 	dataContentExpectedLen := contentLength + 4 // 4: 1 bytefor content type, 3 bytes for length
 	if dataContentExpectedLen != len(contentData) {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("conent length does not fit data passed, expected to have length of: %v, got: %v", dataContentExpectedLen, len(contentData))
 	}
 
 	clientVersion := contentData[4:6] // backward compability, used to dicated which version to use, now we have version in protocol header.
 
-	if !reflect.DeepEqual(clientVersion, serverData.SSLVersion) {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
-		return fmt.Errorf("ssl version not matches, expected: %v, got: %v", serverData.SSLVersion, clientVersion)
+	if !reflect.DeepEqual(clientVersion, serverData.Version) {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+		return fmt.Errorf("ssl version not matches, expected: %v, got: %v", serverData.Version, clientVersion)
 	}
 	radnomBytesTime := int64(binary.BigEndian.Uint32(contentData[6:10]))
 	currentTime := time.Now().UnixMilli()
 
 	if currentTime < radnomBytesTime {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("time: %v should be less than is currently: %v", radnomBytesTime, currentTime)
 	}
 
 	sessionLength := int(contentData[38])
 	if sessionLength > 32 {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("session length should be between 0-32")
 	}
 	sessionIndexEnd := uint16(39 + sessionLength)
@@ -1012,7 +742,7 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 	compressionMethodList := contentData[sessionIndexEnd+2+cipherSuitesLength+1:]
 
 	if len(compressionMethodList) != int(compressionsLength) {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("\n got length:%v, expected :%v", len(compressionMethodList), int(compressionsLength))
 	}
 
@@ -1021,12 +751,12 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 	serverData.ClientRandom = contentData[6:38]
 	err := serverData.CipherDef.SelectCipherSuite(cipherSuites)
 	if err != nil {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("problem selecting cipher suite, err: %v", err)
 	}
 	serverData.CipherDef.GetCipherSpecInfo()
 
-	if serverData.CipherDef.Spec.SignatureAlgorithm != s3_cipher.SignatureAlgorithmAnonymous && serverData.cert == nil {
+	if serverData.CipherDef.Spec.SignatureAlgorithm != cipher.SignatureAlgorithmAnonymous && serverData.cert == nil {
 		return fmt.Errorf("please provider certificate for: %v", serverData.CipherDef.Spec.SignatureAlgorithm)
 	}
 	err = serverData.CipherDef.SelectCompressionMethod(compressionMethodList)
@@ -1053,19 +783,19 @@ func (serverData *ServerData) serverKeyExchange() error {
 	hash := []byte{}
 
 	switch serverData.CipherDef.Spec.SignatureAlgorithm {
-	case s3_cipher.SignatureAlgorithmAnonymous:
-	case s3_cipher.SignatureAlgorithmRSA:
+	case cipher.SignatureAlgorithmAnonymous:
+	case cipher.SignatureAlgorithmRSA:
 		md5Hash := signatureHash(md5.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
 		shaHash := signatureHash(sha1.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
 		hash = append(hash, md5Hash...)
 		hash = append(hash, shaHash...)
 
-	case s3_cipher.SignatureAlgorithmDSA:
+	case cipher.SignatureAlgorithmDSA:
 
 		shaHash := signatureHash(sha1.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
 		hash = append(hash, shaHash...)
 	default:
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("unsupported Algorithm: %v", serverData.CipherDef.Spec.SignatureAlgorithm)
 	}
 
@@ -1073,7 +803,7 @@ func (serverData *ServerData) serverKeyExchange() error {
 	signatureLength := helpers.Int32ToBigEndian(len(signedParams))
 
 	if err != nil {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("problem with singin data, err: %v", err)
 	}
 
@@ -1087,15 +817,15 @@ func (serverData *ServerData) serverKeyExchange() error {
 	handshakeLengthh := len(keyExchangeData)
 	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(handshakeLengthh)
 	if err != nil {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("err while converting to big endian, err: %v", err)
 	}
 
-	serverKeyExchange := []byte{byte(TLSHandshakeMessageServerKeyExchange)}
+	serverKeyExchange := []byte{byte(HandshakeMessageServerKeyExchange)}
 	serverKeyExchange = append(serverKeyExchange, handshakeLengthByte...)
 	serverKeyExchange = append(serverKeyExchange, keyExchangeData...)
 
-	err = serverData.BuffSendData(TLSContentTypeHandshake, serverKeyExchange)
+	err = serverData.BuffSendData(ContentTypeHandshake, serverKeyExchange)
 
 	return err
 }
@@ -1111,13 +841,13 @@ func (serverData *ServerData) serverHello() error {
 	_, err := rand.Read(randomBytes)
 
 	if err != nil {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("problem generating random bytes, err:%v", err)
 	}
 
 	cipherSuite := helpers.Int32ToBigEndian(int(serverData.CipherDef.CipherSuite))
 	compressionMethod := []byte{byte(serverData.CipherDef.Spec.CompressionMethod)}
-	protocolVersion := serverData.SSLVersion
+	protocolVersion := serverData.Version
 
 	session := []byte{}
 	sessionLength := []byte{0}
@@ -1139,7 +869,7 @@ func (serverData *ServerData) serverHello() error {
 		return fmt.Errorf("error converting int to big endian: %v", err)
 	}
 
-	serverHello := []byte{byte(TLSHandshakeMessageServerHello)}
+	serverHello := []byte{byte(HandshakeMessageServerHello)}
 	serverHello = append(serverHello, handshakeLengthByte...)
 	serverHello = append(serverHello, protocolVersion...)
 	serverHello = append(serverHello, unitTimeBytes...)
@@ -1152,19 +882,16 @@ func (serverData *ServerData) serverHello() error {
 	serverData.ServerRandom = unitTimeBytes
 	serverData.ServerRandom = append(serverData.ServerRandom, randomBytes...)
 
-	err = serverData.BuffSendData(TLSContentTypeHandshake, serverHello)
+	err = serverData.BuffSendData(ContentTypeHandshake, serverHello)
 
 	return err
 }
 
 func (serverData *ServerData) serverHelloDone() error {
-	// serverHelloDone := []byte{byte(TLSContentTypeHandshake)}
-	// serverHelloDone = append(serverHelloDone, serverData.SSLVersion...)
-	// serverHelloDone = append(serverHelloDone, []byte{0, 4}...) // hardcoded as it is always 4 bytes, 1 byte messageType 3 bytes length
-	serverHelloDone := []byte{byte(TLSHandshakeMessageServerHelloDone)}
+	serverHelloDone := []byte{byte(HandshakeMessageServerHelloDone)}
 	serverHelloDone = append(serverHelloDone, []byte{0, 0, 0}...) // Always 0 length
 
-	err := serverData.BuffSendData(TLSContentTypeHandshake, serverHelloDone)
+	err := serverData.BuffSendData(ContentTypeHandshake, serverHelloDone)
 
 	return err
 }
@@ -1221,7 +948,7 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) {
 	macEndIndex := serverData.CipherDef.Spec.HashSize * 2
 	writeKeyEndIndex := macEndIndex + serverData.CipherDef.Spec.KeyMaterial*2
 
-	cipherDefKeys := s3_cipher.CipherKeys{
+	cipherDefKeys := cipher.CipherKeys{
 		MacClient:      keyBlock[:serverData.CipherDef.Spec.HashSize],
 		MacServer:      keyBlock[serverData.CipherDef.Spec.HashSize:macEndIndex],
 		WriteKeyClient: keyBlock[macEndIndex : macEndIndex+serverData.CipherDef.Spec.KeyMaterial],
@@ -1258,15 +985,9 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) {
 func (serverData *ServerData) changeCipher() error {
 	serverData.ServerSeqNum = []byte{0, 0, 0, 0, 0, 0, 0, 0}
 
-	changeCipherSpecContent := []byte{byte(TLSCipherSpecDefault)}
-	// changeCiperSpecLength := helpers.Int32ToBigEndian(len(changeCipherSpecContent))
+	changeCipherSpecContent := []byte{byte(CipherSpecDefault)}
 
-	// changeCipherSpecMsg := []byte{byte(TLSContentTypeChangeCipherSpec)}
-	// changeCipherSpecMsg = append(changeCipherSpecMsg, serverData.SSLVersion...)
-	// changeCipherSpecMsg = append(changeCipherSpecMsg, changeCiperSpecLength...)
-	// changeCipherSpecMsg = append(changeCipherSpecMsg, changeCipherSpecContent...)
-
-	err := serverData.BuffSendData(TLSContentTypeChangeCipherSpec, changeCipherSpecContent)
+	err := serverData.BuffSendData(ContentTypeChangeCipherSpec, changeCipherSpecContent)
 
 	return err
 }
@@ -1276,25 +997,25 @@ func (serverData *ServerData) serverFinished() error {
 	serverBytes := helpers.Int64ToBIgEndian(int64(serverSender))
 
 	verifyHashMac := []byte{}
-	md5Hash := generate_finished_handshake_mac(md5.New(), serverData.MasterKey, serverBytes, serverData.HandshakeMessages)
-	shaHash := generate_finished_handshake_mac(sha1.New(), serverData.MasterKey, serverBytes, serverData.HandshakeMessages)
+	md5Hash := serverData.generate_finished_handshake_mac(md5.New(), serverBytes, serverData.HandshakeMessages)
+	shaHash := serverData.generate_finished_handshake_mac(sha1.New(), serverBytes, serverData.HandshakeMessages)
 
 	hashLen := len(md5Hash) + len(shaHash)
 	msgLenEndian, err := helpers.IntTo3BytesBigEndian(hashLen)
 
 	if err != nil {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("problem converting hash len into endian format")
 	}
 
 	verifyHashMac = append(verifyHashMac, md5Hash...)
 	verifyHashMac = append(verifyHashMac, shaHash...)
 
-	verifyMacWithHeaders := []byte{byte(TLSHandshakeMessageFinished)}
+	verifyMacWithHeaders := []byte{byte(HandshakeMessageFinished)}
 	verifyMacWithHeaders = append(verifyMacWithHeaders, msgLenEndian...)
 	verifyMacWithHeaders = append(verifyMacWithHeaders, verifyHashMac...)
 
-	err = serverData.BuffSendData(TLSContentTypeHandshake, verifyMacWithHeaders)
+	err = serverData.BuffSendData(ContentTypeHandshake, verifyMacWithHeaders)
 
 	return err
 
@@ -1306,8 +1027,11 @@ func (serverData *ServerData) handleHandshakeClientFinished(contentData []byte) 
 
 	clientHash := []byte{}
 
-	md5Hash := generate_finished_handshake_mac(md5.New(), serverData.MasterKey, clientBytes, serverData.HandshakeMessages[:len(serverData.HandshakeMessages)-1])  // -1 without last message witch is client verify
-	shaHash := generate_finished_handshake_mac(sha1.New(), serverData.MasterKey, clientBytes, serverData.HandshakeMessages[:len(serverData.HandshakeMessages)-1]) // -1 without last message witch is client verify
+	fmt.Println("hello message")
+	fmt.Println(serverData.HandshakeMessages)
+
+	md5Hash := serverData.generate_finished_handshake_mac(md5.New(), clientBytes, serverData.HandshakeMessages[:len(serverData.HandshakeMessages)-1])  // -1 without last message witch is client verify
+	shaHash := serverData.generate_finished_handshake_mac(sha1.New(), clientBytes, serverData.HandshakeMessages[:len(serverData.HandshakeMessages)-1]) // -1 without last message witch is client verify
 
 	hashLen := len(md5Hash) + len(shaHash)
 
@@ -1318,7 +1042,7 @@ func (serverData *ServerData) handleHandshakeClientFinished(contentData []byte) 
 	inputHash := contentData[4:]
 
 	if !reflect.DeepEqual(clientHash, inputHash[:hashLen]) {
-		serverData.sendAlertMsg(TLSAlertLevelfatal, TLSAlertDescriptionBadRecordMac)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionBadRecordMac)
 		return fmt.Errorf("message are different, expected: %v, got: %v", inputHash[:hashLen], clientHash)
 	}
 	return nil
@@ -1326,8 +1050,8 @@ func (serverData *ServerData) handleHandshakeClientFinished(contentData []byte) 
 
 func (serverData *ServerData) handleHandshakeChangeCipherSpec(contentData []byte) {
 	serverData.ClientSeqNum = []byte{0, 0, 0, 0, 0, 0, 0, 0}
-	message := TLSCipherSpec(contentData[0])
-	if message == TLSCipherSpecDefault {
+	message := CipherSpec(contentData[0])
+	if message == CipherSpecDefault {
 		fmt.Print("Sender is switching to new cipher")
 	}
 	serverData.IsClientEncrypted = true

@@ -3,13 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"handshakeServer/handshake"
 	"os"
-	"sync"
-	"webserver/global"
-	"webserver/handshake"
+	"os/signal"
 )
 
-func loadParams() *global.Params {
+func loadParams() *handshake.HttpServerCertParam {
 	cert := flag.String("cert", "", "Server certificate")
 	key := flag.String("key", "", "Cert private key")
 	flag.Parse()
@@ -24,26 +23,28 @@ func loadParams() *global.Params {
 		os.Exit(1)
 	}
 
-	return &global.Params{
+	return &handshake.HttpServerCertParam{
 		CertPath: pwd + *cert,
 		KeyPath:  pwd + *key,
 	}
 }
 
 func main() {
-	// http.Cors("http://localhost:5501")
+	certParams := loadParams()
 
-	// server := server.CreateServer()
-	// server.RunServer()
-	params := loadParams()
+	server, err := handshake.CreateServer(
+		handshake.WithAddress("127.0.0.1", "4221"),
+		handshake.WithCertificate(certParams),
+	)
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	server := global.Server{
-		Wg: &wg,
+	if err != nil {
+		fmt.Printf("\n couldnt create server listener, err: %v", err)
+		os.Exit(1)
 	}
 
-	handshake.StartHttpServer(params, &server)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	<-c
+	server.CloseHttpServer()
 
 }
