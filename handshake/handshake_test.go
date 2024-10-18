@@ -317,9 +317,9 @@ func (serverData *ServerData) computeKeys(data []byte) error {
 
 	keyBlockLen := tripledDesHashSize*2 + tripledDesKeyMaterialSize*2 + tripledDesIvSize*2
 
-	masterKey := ssl_prf(preMasterSecret, masterKeySeed, MASTER_SECRET_LENGTH)
+	masterKey := s3_prf(preMasterSecret, masterKeySeed, MASTER_SECRET_LENGTH)
 
-	keyBlock := ssl_prf(masterKey, keyBlockSeed, keyBlockLen)
+	keyBlock := s3_prf(masterKey, keyBlockSeed, keyBlockLen)
 
 	macEndIndex := tripledDesHashSize * 2
 	writeKeyEndIndex := macEndIndex + tripledDesKeyMaterialSize*2
@@ -383,12 +383,12 @@ func (serverData *ServerData) verifyServerFinished(data []byte) error {
 	serverShaHash := decryptedServerFinishedDataNoHeader[16:36]
 	serverCipher := decryptedServerFinishedDataNoHeader[36:]
 
-	md5Hash := serverData.generate_finished_handshake_mac(md5.New(), serverBytes, serverData.HandshakeMessages) // -1 without last message witch is client verify
-	shaHash := serverData.generate_finished_handshake_mac(sha1.New(), serverBytes, serverData.HandshakeMessages)
+	md5Hash := serverData.S3GenerateFinishedHandshakeMac(md5.New(), serverBytes, serverData.HandshakeMessages) // -1 without last message witch is client verify
+	shaHash := serverData.S3GenerateFinishedHandshakeMac(sha1.New(), serverBytes, serverData.HandshakeMessages)
 	cipherData := decryptedServerFinishedData[:4]
 	cipherData = append(cipherData, md5Hash...)
 	cipherData = append(cipherData, shaHash...)
-	streamCipher := serverData.generateStreamCipher([]byte{byte(ContentTypeHandshake)}, cipherData, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacServer)
+	streamCipher := serverData.S3generateStreamCipher([]byte{byte(ContentTypeHandshake)}, cipherData, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacServer)
 
 	if !reflect.DeepEqual(serverMd5Hash, md5Hash) {
 		return fmt.Errorf("Server finished md5 is diffrent than computed expected: %v, got: %v", md5Hash, serverMd5Hash)
@@ -408,20 +408,17 @@ func (serverData *ServerData) verifyServerFinished(data []byte) error {
 func (serverData *ServerData) generateClientFinishedMsg() ([]byte, error) {
 
 	clientBytes := helpers.Int64ToBIgEndian(int64(ClientSender))
-	md5Hash := serverData.generate_finished_handshake_mac(md5.New(), clientBytes, serverData.HandshakeMessages) // -1 without last message witch is client verify
-	shaHash := serverData.generate_finished_handshake_mac(sha1.New(), clientBytes, serverData.HandshakeMessages)
+	md5Hash := serverData.S3GenerateFinishedHandshakeMac(md5.New(), clientBytes, serverData.HandshakeMessages) // -1 without last message witch is client verify
+	shaHash := serverData.S3GenerateFinishedHandshakeMac(sha1.New(), clientBytes, serverData.HandshakeMessages)
 
 	hashMessages := append(md5Hash, shaHash...)
 
 	msg := []byte{20, 0, 0, 36}
 	msg = append(msg, hashMessages...)
 
-	fmt.Println("handshake msgs")
-	fmt.Println(serverData.HandshakeMessages)
-
 	serverData.HandshakeMessages = append(serverData.HandshakeMessages, msg)
 
-	streamCipher := serverData.generateStreamCipher([]byte{byte(ContentTypeHandshake)}, msg, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacClient)
+	streamCipher := serverData.S3generateStreamCipher([]byte{byte(ContentTypeHandshake)}, msg, serverData.ClientSeqNum, serverData.CipherDef.Keys.MacClient)
 
 	msg = append(msg, streamCipher...)
 
@@ -597,7 +594,6 @@ func generateRsaCert(weak bool) *HttpServerCertParam {
 		Type:  "PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
 	})
-	fmt.Println("cert created?")
 
 	certTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(1), // Serial number for the certificate
@@ -725,8 +721,7 @@ func getOpenSslDir() string {
 
 func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 	server := startServer(nil)
-	fmt.Println("hello")
-	fmt.Println(server)
+
 	defer StopServer(*server)
 
 	conn, err := net.Dial("tcp", Address+":"+Port)

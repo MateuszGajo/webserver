@@ -1,6 +1,7 @@
 package cipher
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/cipher"
 	"crypto/dsa"
@@ -60,6 +61,13 @@ const (
 	SignatureAlgorithmAnonymous SignatureAlgorithm = "signatureAnonymous"
 )
 
+type PaddingType string
+
+const (
+	LengthPaddingType PaddingType = "lengthPadding"
+	ZerosPaddingType  PaddingType = "zerosPadding"
+)
+
 type CipherSpec struct {
 	HashSize          int
 	KeyMaterial       int
@@ -73,6 +81,7 @@ type CipherSpec struct {
 	SignatureAlgorithm  SignatureAlgorithm
 	CompressionMethod   CompressionMethod
 	IsExportable        bool
+	PaddingType         PaddingType
 }
 
 type CipherDef struct {
@@ -234,11 +243,11 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) ([]
 	var err error
 	switch cipherDef.Spec.EncryptionAlgorithm {
 	case EncryptionAlgorithm3DES:
-		encryptedMsg, err = Encrypt3DesMessage(data, writeKey, iv)
+		encryptedMsg, err = cipherDef.Encrypt3DesMessage(data, writeKey, iv)
 	case EncryptionAlgorithmDES:
-		encryptedMsg, err = EncryptDesMessage(data, writeKey, iv)
+		encryptedMsg, err = cipherDef.EncryptDesMessage(data, writeKey, iv)
 	case EncryptionAlgorithmDES40:
-		encryptedMsg, err = EncryptDesMessage(data, writeKey, iv)
+		encryptedMsg, err = cipherDef.EncryptDesMessage(data, writeKey, iv)
 	case EncryptionAlgorithmRC4:
 		encryptedMsg, err = cipherDef.EncryptRC4(data, writeKey)
 	case EncryptionAlgorithmRC2:
@@ -480,7 +489,34 @@ func (cipherDef *CipherDef) SelectCompressionMethod(compressionMethods []byte) e
 	}
 
 	return fmt.Errorf("server doesn't have any provided compression method: %v", compressionMethods)
+}
 
+func zerosPadding(src []byte, blockSize int) []byte {
+	paddingLen := blockSize - len(src)%blockSize
+
+	padtext := bytes.Repeat([]byte{0}, paddingLen-1)
+	padtext = append(padtext, byte(paddingLen-1))
+	return append(src, padtext...)
+}
+
+func LengthPadding(src []byte, blockSize int) []byte {
+	paddingLen := blockSize - len(src)%blockSize
+
+	padtext := bytes.Repeat([]byte{byte(paddingLen - 1)}, paddingLen-1)
+	padtext = append(padtext, byte(paddingLen-1))
+	return append(src, padtext...)
+}
+
+func (cipherDef *CipherDef) addPadding(src []byte, blockSize int) []byte {
+	switch cipherDef.Spec.PaddingType {
+	case LengthPaddingType:
+		return LengthPadding(src, blockSize)
+	case ZerosPaddingType:
+		return zerosPadding(src, blockSize)
+	}
+	fmt.Println("Should never enter this state")
+	os.Exit(1)
+	return []byte{}
 }
 
 func (cipherDef *CipherDef) GetCipherSpecInfo() error {
@@ -551,8 +587,6 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 		cipherDef.Spec.IvSize = 8
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmRC2
 	default:
-		fmt.Println("hello")
-		fmt.Println(cipherSuitParts)
 		fmt.Printf("\n encryption algorithm not implemented: %v", encryptionAlgorithm)
 		os.Exit(1)
 	}

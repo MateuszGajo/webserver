@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"handshakeServer/handshake"
@@ -8,33 +9,60 @@ import (
 	"os/signal"
 )
 
-func loadParams() *handshake.HttpServerCertParam {
+type params struct {
+	version handshake.Version
+	cert    *handshake.HttpServerCertParam
+}
+
+func loadParams() params {
+	// TODO: implement this
 	cert := flag.String("cert", "", "Server certificate")
 	key := flag.String("key", "", "Cert private key")
+	ssl3Version := flag.Bool("ssl3", false, "ssl 3.0")
+	tls1Version := flag.Bool("tls1", false, "tls 1.0")
 	flag.Parse()
 
-	if *cert == "" || *key == "" {
-		return nil
-	}
+	var certParam *handshake.HttpServerCertParam
 	pwd, err := os.Getwd()
+	if *cert == "" || *key == "" {
+		certParam = nil
+	} else {
+		certParam = &handshake.HttpServerCertParam{
+			CertPath: pwd + *cert,
+			KeyPath:  pwd + *key,
+		}
+	}
+
+	var version handshake.Version
+	if *tls1Version {
+		version = handshake.TLS10Version
+	} else if *ssl3Version {
+		version = handshake.SSL30Version
+	} else {
+		// dufault
+		version = handshake.TLS10Version
+	}
 
 	if err != nil {
 		fmt.Printf("\n cannot get root path, err:%v", err)
 		os.Exit(1)
 	}
 
-	return &handshake.HttpServerCertParam{
-		CertPath: pwd + *cert,
-		KeyPath:  pwd + *key,
+	return params{
+		cert:    certParam,
+		version: version,
 	}
 }
 
 func main() {
-	certParams := loadParams()
+	params := loadParams()
+	sslVersionBinary := make([]byte, 2)
+	binary.BigEndian.PutUint16(sslVersionBinary, uint16(params.version))
 
 	server, err := handshake.CreateServer(
 		handshake.WithAddress("127.0.0.1", "4221"),
-		handshake.WithCertificate(certParams),
+		handshake.WithCertificate(params.cert),
+		handshake.WithSSLVersion(sslVersionBinary),
 	)
 
 	if err != nil {

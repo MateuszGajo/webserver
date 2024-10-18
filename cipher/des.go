@@ -1,22 +1,12 @@
 package cipher
 
 import (
-	"bytes"
 	"crypto/cipher"
 	"crypto/des"
 	"fmt"
 )
 
-var PADDING_LENGTH = 8
-
-func addCustomPadding(src []byte, blockSize int) []byte {
-	paddingLen := blockSize - len(src)%blockSize
-
-	padtext := bytes.Repeat([]byte{0}, paddingLen-1)
-	// This how openssl implemented this len of padding -1, https://crypto.stackexchange.com/questions/98917/on-the-correctness-of-the-padding-example-of-rfc-5246
-	padtext = append(padtext, byte(paddingLen-1))
-	return append(src, padtext...)
-}
+// Openssl implemented custom padding its not pkcs5 nor pkcs7 format https://crypto.stackexchange.com/questions/98917/on-the-correctness-of-the-padding-example-of-rfc-5246
 
 func removeCustomPadding(src []byte, blockSize int) ([]byte, error) {
 	paddingLen := int(src[len(src)-1]) + 1 // openssl did it this way, len of padding -1
@@ -87,10 +77,10 @@ func Decrypt3DesMessage(encryptedData, writeKey, iv []byte) ([]byte, error) {
 	return decodedMsgWithoutPadding, nil
 }
 
-func Encrypt3DesMessage(data, writeKey, iv []byte) ([]byte, error) {
+func (cipherDef *CipherDef) Encrypt3DesMessage(data, writeKey, iv []byte) ([]byte, error) {
 	padLength := roundUpToMultiple(len(data), des.BlockSize)
 
-	dataPadded := addCustomPadding(data, padLength)
+	dataPadded := cipherDef.addPadding(data, padLength)
 
 	encryptedMsg, err := Encrypt3Des(writeKey, iv, dataPadded)
 	if err != nil {
@@ -152,10 +142,10 @@ func DecryptDesMessage(encryptedData, writeKey, iv []byte) ([]byte, error) {
 	return decodedMsgWithoutPadding, nil
 }
 
-func EncryptDesMessage(data, writeKey, iv []byte) ([]byte, error) {
+func (cipherDef *CipherDef) EncryptDesMessage(data, writeKey, iv []byte) ([]byte, error) {
 	padLength := roundUpToMultiple(len(data), des.BlockSize)
 
-	dataPadded := addCustomPadding(data, padLength)
+	dataPadded := cipherDef.addPadding(data, padLength)
 
 	encryptedMsg, err := EncryptDes(writeKey, iv, dataPadded)
 	if err != nil {

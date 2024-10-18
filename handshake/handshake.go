@@ -11,6 +11,7 @@ import (
 	"handshakeServer/helpers"
 	"hash"
 	"net"
+	"os"
 	"reflect"
 	"sync"
 	"time"
@@ -122,6 +123,7 @@ type Version uint16
 
 const (
 	SSL30Version Version = 0x0300
+	TLS10Version Version = 0x0301
 )
 
 type AlertDescription byte
@@ -227,113 +229,6 @@ func (serverData *ServerData) sendAlertMsg(level AlertLevel, description AlertDe
 
 }
 
-func (serverData *ServerData) generate_finished_handshake_mac(hashingAlgorithm hash.Hash, sender []byte, handshakeMessages [][]byte) []byte {
-	n := hashingAlgorithm.Size()
-	// Legacy thing with fixed number of 48 bytes
-	npad := (48 / n) * n
-
-	pad1Arr := pad1[:npad]
-	pad2Arr := pad2[:npad]
-
-	allHandskaedMessageCombined := []byte{}
-
-	for _, v := range handshakeMessages {
-		allHandskaedMessageCombined = append(allHandskaedMessageCombined, v...)
-	}
-
-	hashingAlgorithm.Write(allHandskaedMessageCombined)
-	hashingAlgorithm.Write(sender)
-	hashingAlgorithm.Write(serverData.MasterKey)
-	hashingAlgorithm.Write(pad1Arr)
-
-	tmp := hashingAlgorithm.Sum(nil)
-	hashingAlgorithm.Reset()
-
-	hashingAlgorithm.Write(serverData.MasterKey)
-	hashingAlgorithm.Write(pad2Arr)
-	hashingAlgorithm.Write(tmp)
-
-	return hashingAlgorithm.Sum(nil)
-}
-
-func ssl_prf(secret, seed []byte, req_len int) []byte {
-	hashSHA1 := sha1.New()
-	hashMD5 := md5.New()
-	result := []byte{}
-
-	rounds := (req_len + hashMD5.Size() - 1) / hashMD5.Size()
-
-	labelArr := [][]byte{{'A'}, {'B', 'B'}, {'C', 'C', 'C'}, {'D', 'D', 'D', 'D'}, {'E', 'E', 'E', 'E', 'E'}, {'F', 'F', 'F', 'F', 'F', 'F'}, {'G', 'G', 'G', 'G', 'G', 'G', 'G'}}
-
-	for i := 0; i < rounds; i++ {
-		label := labelArr[i]
-
-		hashSHA1.Reset()
-		hashSHA1.Write(label)
-		hashSHA1.Write(secret)
-		hashSHA1.Write(seed)
-		digest := hashSHA1.Sum(nil)
-
-		hashMD5.Reset()
-		hashMD5.Write(secret)
-		hashMD5.Write(digest)
-		md5Digest := hashMD5.Sum(nil)
-
-		result = append(result, md5Digest...)
-	}
-
-	return result
-}
-
-func (serverData *ServerData) generateStreamCipher(dataCompressedType, sslCompressData []byte, seqNum, mac []byte) []byte {
-
-	// 	stream-ciphered struct {
-	// 		opaque content[SSLCompressed.length];
-	// 		opaque MAC[CipherSpec.hash_size];
-	// 	} GenericStreamCipher;
-
-	// The MAC is generated as:
-
-	// 	hash(MAC_write_secret + pad_2 +
-	// 		 hash(MAC_write_secret + pad_1 + seq_num +
-	// 			  SSLCompressed.type + SSLCompressed.length +
-	// 			  SSLCompressed.fragment));
-	var nPad int
-	var hashFunc hash.Hash
-
-	switch serverData.CipherDef.Spec.HashAlgorithm {
-	case cipher.HashAlgorithmMD5:
-		nPad = 48
-		hashFunc = md5.New()
-	case cipher.HashAlgorithmSHA:
-		nPad = 40
-		hashFunc = sha1.New()
-	default:
-		panic("wrong algorithm used can't use: " + serverData.CipherDef.Spec.HashAlgorithm)
-	}
-
-	ssl3Pad1Sha := pad1[:nPad]
-	ssl3Pad2Sha := pad2[:nPad]
-
-	sslCompressLength := helpers.Int32ToBigEndian(len(sslCompressData))
-
-	hashFunc.Write(mac)
-	hashFunc.Write(ssl3Pad1Sha)
-	hashFunc.Write(seqNum)
-	hashFunc.Write(dataCompressedType)
-	hashFunc.Write(sslCompressLength)
-	hashFunc.Write(sslCompressData)
-
-	tmp := hashFunc.Sum(nil)
-	hashFunc.Reset()
-
-	hashFunc.Write(mac)
-	hashFunc.Write(ssl3Pad2Sha)
-	hashFunc.Write(tmp)
-
-	return hashFunc.Sum(nil)
-}
-
 func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) error {
 	contentType := clientData[0]
 	dataContent := clientData[5:]
@@ -376,6 +271,18 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) err
 	}
 	return err
 
+}
+func (serverData *ServerData) generateStreamCipher(dataCompressedType, sslCompressData, seqNum, mac []byte) []byte {
+	switch binary.BigEndian.Uint16(serverData.Version) {
+	case 0x0300:
+		return serverData.S3generateStreamCipher(dataCompressedType, sslCompressData, seqNum, mac)
+	case 0x0301:
+		return serverData.T1GenerateStreamCipher(dataCompressedType, sslCompressData, seqNum, mac)
+	default:
+		fmt.Println("should never enter this state")
+		os.Exit(1)
+	}
+	return []byte{}
 }
 
 func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) ([]byte, error) {
@@ -658,14 +565,16 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 			return nil
 		}
 
-		serverData.handleHandshakeClientFinished(contentData)
+		if err := serverData.handleHandshakeClientFinished(contentData); err != nil {
+			return err
+		}
 
-		if err := serverData.changeCipher(); err != nil {
+		if err = serverData.changeCipher(); err != nil {
 			return fmt.Errorf("problem with changing cipher, err: %v", err)
 		}
 
 		// We don't combine message here to single route trip as change cipher msg is separate content type, in order to not be stalling
-		_, err := serverData.sendData(serverData.wBuff)
+		_, err = serverData.sendData(serverData.wBuff)
 		if err != nil {
 			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 			return fmt.Errorf("\n problem sending change cipher msg: %v", err)
@@ -760,6 +669,8 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 		return fmt.Errorf("please provider certificate for: %v", serverData.CipherDef.Spec.SignatureAlgorithm)
 	}
 	err = serverData.CipherDef.SelectCompressionMethod(compressionMethodList)
+
+	serverData.SelectBlockCipherPadding()
 
 	return err
 }
@@ -896,6 +807,11 @@ func (serverData *ServerData) serverHelloDone() error {
 	return err
 }
 
+var masterKeyGenLabel = map[uint16][]byte{
+	0x0300: []byte{},
+	0x0301: []byte("master secret"),
+}
+
 func (serverData *ServerData) handleHandshakeClientKeyExchange(contentData []byte) error {
 
 	preMasterSecret, err := serverData.CipherDef.ComputerMasterSecret(contentData[4:])
@@ -908,7 +824,8 @@ func (serverData *ServerData) handleHandshakeClientKeyExchange(contentData []byt
 	masterKeySeed = append(masterKeySeed, serverData.ClientRandom...)
 	masterKeySeed = append(masterKeySeed, serverData.ServerRandom...)
 
-	masterKey := ssl_prf(preMasterSecret, masterKeySeed, MASTER_SECRET_LENGTH)
+	label := masterKeyGenLabel[binary.BigEndian.Uint16(serverData.Version)]
+	masterKey := serverData.prf(preMasterSecret, masterKeySeed, label, MASTER_SECRET_LENGTH)
 
 	serverData.calculateKeyBlock(masterKey)
 
@@ -937,13 +854,47 @@ func (serverData *ServerData) calculateExportableFinalIv(seed []byte) []byte {
 
 }
 
+var keyBlockLabel = map[uint16][]byte{
+	0x0300: []byte{},
+	0x0301: []byte("key expansion"),
+}
+
+func (serverData *ServerData) prf(key, seed, label []byte, length int) []byte {
+	seedExtended := label
+	seedExtended = append(seedExtended, seed...)
+	switch binary.BigEndian.Uint16(serverData.Version) {
+	case 0x0300:
+		return s3_prf(key, seedExtended, length)
+	case 0x0301:
+		return T1Prf(key, seedExtended, length)
+	default:
+		fmt.Println("should never enter this state")
+		os.Exit(1)
+	}
+	return []byte{}
+}
+
+func (serverData *ServerData) SelectBlockCipherPadding() error {
+	switch binary.BigEndian.Uint16(serverData.Version) {
+	case 0x0300:
+		serverData.CipherDef.Spec.PaddingType = cipher.ZerosPaddingType
+	case 0x0301:
+		serverData.CipherDef.Spec.PaddingType = cipher.LengthPaddingType
+	default:
+		return fmt.Errorf("unsporrted version")
+	}
+	return nil
+
+}
+
 func (serverData *ServerData) calculateKeyBlock(masterKey []byte) {
 	keyBlockSeed := []byte{}
 	keyBlockSeed = append(keyBlockSeed, serverData.ServerRandom...)
 	keyBlockSeed = append(keyBlockSeed, serverData.ClientRandom...)
 
 	keyBlockLen := serverData.CipherDef.Spec.HashSize*2 + serverData.CipherDef.Spec.KeyMaterial*2 + serverData.CipherDef.Spec.IvSize*2
-	keyBlock := ssl_prf(masterKey, keyBlockSeed, keyBlockLen)
+	label := keyBlockLabel[binary.BigEndian.Uint16(serverData.Version)]
+	keyBlock := serverData.prf(masterKey, keyBlockSeed, label, keyBlockLen)
 
 	macEndIndex := serverData.CipherDef.Spec.HashSize * 2
 	writeKeyEndIndex := macEndIndex + serverData.CipherDef.Spec.KeyMaterial*2
@@ -978,7 +929,6 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) {
 		cipherDefKeys.IVServer = IVServer[:serverData.CipherDef.Spec.IvSize]
 
 	}
-
 	serverData.CipherDef.Keys = cipherDefKeys
 }
 
@@ -994,22 +944,17 @@ func (serverData *ServerData) changeCipher() error {
 
 func (serverData *ServerData) serverFinished() error {
 	serverData.IsServerEncrypted = true
-	serverBytes := helpers.Int64ToBIgEndian(int64(serverSender))
+	label := finishedLabel[uint16(binary.BigEndian.Uint16(serverData.Version))]["server"]
 
-	verifyHashMac := []byte{}
-	md5Hash := serverData.generate_finished_handshake_mac(md5.New(), serverBytes, serverData.HandshakeMessages)
-	shaHash := serverData.generate_finished_handshake_mac(sha1.New(), serverBytes, serverData.HandshakeMessages)
+	verifyHashMac := serverData.generate_finished_handshake_mac(label, serverData.HandshakeMessages)
 
-	hashLen := len(md5Hash) + len(shaHash)
+	hashLen := len(verifyHashMac)
 	msgLenEndian, err := helpers.IntTo3BytesBigEndian(hashLen)
 
 	if err != nil {
 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("problem converting hash len into endian format")
 	}
-
-	verifyHashMac = append(verifyHashMac, md5Hash...)
-	verifyHashMac = append(verifyHashMac, shaHash...)
 
 	verifyMacWithHeaders := []byte{byte(HandshakeMessageFinished)}
 	verifyMacWithHeaders = append(verifyMacWithHeaders, msgLenEndian...)
@@ -1021,22 +966,39 @@ func (serverData *ServerData) serverFinished() error {
 
 }
 
+func (serverData *ServerData) generate_finished_handshake_mac(label []byte, handshakeMessages [][]byte) []byte {
+	switch binary.BigEndian.Uint16(serverData.Version) {
+	case 0x0300:
+		md5Hash := serverData.S3GenerateFinishedHandshakeMac(md5.New(), label, handshakeMessages) // -1 without last message witch is client verify
+		shaHash := serverData.S3GenerateFinishedHandshakeMac(sha1.New(), label, handshakeMessages)
+		return append(md5Hash, shaHash...)
+	case 0x0301:
+		return serverData.T1GenerateFinishedHandshakeMac(label, handshakeMessages)
+	default:
+		fmt.Println("should never enter this state")
+		os.Exit(1)
+	}
+	return []byte{}
+}
+
+var finishedLabel = map[uint16]map[string][]byte{
+	0x0300: {
+		"client": helpers.Int64ToBIgEndian(int64(ClientSender)),
+		"server": helpers.Int64ToBIgEndian(int64(serverSender)),
+	},
+	0x0301: {
+		"client": []byte("client finished"),
+		"server": []byte("server finished"),
+	},
+}
+
 func (serverData *ServerData) handleHandshakeClientFinished(contentData []byte) error {
 
-	clientBytes := helpers.Int64ToBIgEndian(int64(ClientSender))
+	label := finishedLabel[uint16(binary.BigEndian.Uint16(serverData.Version))]["client"]
 
-	clientHash := []byte{}
+	clientHash := serverData.generate_finished_handshake_mac(label, serverData.HandshakeMessages[:len(serverData.HandshakeMessages)-1])
 
-	fmt.Println("hello message")
-	fmt.Println(serverData.HandshakeMessages)
-
-	md5Hash := serverData.generate_finished_handshake_mac(md5.New(), clientBytes, serverData.HandshakeMessages[:len(serverData.HandshakeMessages)-1])  // -1 without last message witch is client verify
-	shaHash := serverData.generate_finished_handshake_mac(sha1.New(), clientBytes, serverData.HandshakeMessages[:len(serverData.HandshakeMessages)-1]) // -1 without last message witch is client verify
-
-	hashLen := len(md5Hash) + len(shaHash)
-
-	clientHash = append(clientHash, md5Hash...)
-	clientHash = append(clientHash, shaHash...)
+	hashLen := len(clientHash)
 
 	// 4 bytes, 1 handshake type, 3 byes length
 	inputHash := contentData[4:]

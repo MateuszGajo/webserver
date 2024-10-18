@@ -1,7 +1,6 @@
 package handshake
 
 import (
-	"encoding/binary"
 	"fmt"
 	"handshakeServer/cipher"
 	"io"
@@ -12,16 +11,18 @@ import (
 )
 
 type HttpServer struct {
-	Listener  net.Listener
-	Wg        *sync.WaitGroup
-	CertParam *HttpServerCertParam
-	address   string
-	port      string
-	quit      chan interface{}
+	Listener   net.Listener
+	Wg         *sync.WaitGroup
+	CertParam  *HttpServerCertParam
+	address    string
+	port       string
+	quit       chan interface{}
+	sslVersion []byte
 }
 type HttpServerCertParam struct {
 	CertPath string
 	KeyPath  string
+	Version  *Version
 }
 
 type ServerData struct {
@@ -56,7 +57,12 @@ func WithCertificate(certParams *HttpServerCertParam) HttpServerOptions {
 	return func(s *HttpServer) {
 		s.CertParam = certParams
 	}
+}
 
+func WithSSLVersion(sslVersion []byte) HttpServerOptions {
+	return func(s *HttpServer) {
+		s.sslVersion = sslVersion
+	}
 }
 
 func CreateServer(options ...HttpServerOptions) (*HttpServer, error) {
@@ -97,10 +103,8 @@ func CreateServer(options ...HttpServerOptions) (*HttpServer, error) {
 func (httpServer *HttpServer) startHttpServer() {
 	defer httpServer.Wg.Done()
 	for {
-		sslVersionBinary := make([]byte, 2)
-		binary.BigEndian.PutUint16(sslVersionBinary, uint16(SSL30Version))
 
-		serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, Version: sslVersionBinary, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: cipher.CipherDef{}}
+		serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, Version: []byte{3, 1}, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: cipher.CipherDef{}}
 
 		if (httpServer.CertParam) != nil {
 
@@ -119,7 +123,6 @@ func (httpServer *HttpServer) startHttpServer() {
 		if err != nil {
 			select {
 			case <-httpServer.quit:
-				fmt.Println("return?")
 				return
 			default:
 				fmt.Printf("errr has occured trying while trying to connect, err :%v", err)

@@ -287,7 +287,7 @@ func (cipherDef CipherDef) EncryptRC2(data, key, iv []byte) ([]byte, error) {
 		cipherDef.Rc2.EncryptCipher = &encryptCipher
 	}
 	padLength := roundUpToMultiple(len(data), 8)
-	dataPadded := addCustomPadding(data, padLength)
+	dataPadded := cipherDef.addPadding(data, padLength)
 
 	mode := cipher.NewCBCEncrypter(*cipherDef.Rc2.EncryptCipher, iv)
 	decrypted := make([]byte, len(dataPadded))
