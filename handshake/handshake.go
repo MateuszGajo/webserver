@@ -279,7 +279,7 @@ func (serverData *ServerData) generateStreamCipher(dataCompressedType, sslCompre
 	case 0x0301:
 		return serverData.T1GenerateStreamCipher(dataCompressedType, sslCompressData, seqNum, mac)
 	default:
-		fmt.Println("should never enter this state")
+		fmt.Println("should never enter this state in generateStreamCipher")
 		os.Exit(1)
 	}
 	return []byte{}
@@ -515,7 +515,9 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 				return fmt.Errorf("problem with change cipher in resuse sesstion, err: %v", err)
 			}
 
-			serverData.calculateKeyBlock(serverData.MasterKey)
+			if err = serverData.calculateKeyBlock(serverData.MasterKey); err != nil {
+				return fmt.Errorf("\n problem calculating key block, err: %v", err)
+			}
 			if err = serverData.serverFinished(); err != nil {
 				return fmt.Errorf("\n problem with serverFinish msg, err: %v", err)
 			}
@@ -825,9 +827,14 @@ func (serverData *ServerData) handleHandshakeClientKeyExchange(contentData []byt
 	masterKeySeed = append(masterKeySeed, serverData.ServerRandom...)
 
 	label := masterKeyGenLabel[binary.BigEndian.Uint16(serverData.Version)]
+	fmt.Println("master key")
 	masterKey := serverData.prf(preMasterSecret, masterKeySeed, label, MASTER_SECRET_LENGTH)
 
-	serverData.calculateKeyBlock(masterKey)
+	err = serverData.calculateKeyBlock(masterKey)
+
+	if err != nil {
+		return fmt.Errorf("Problem while calculating key block: %v", err)
+	}
 
 	serverData.MasterKey = masterKey
 	serverData.PreMasterSecret = preMasterSecret
@@ -835,22 +842,73 @@ func (serverData *ServerData) handleHandshakeClientKeyExchange(contentData []byt
 	return nil
 }
 
-func (serverData *ServerData) calculateExportableFinalWriteKey(key, seed []byte) []byte {
+func (serverData *ServerData) calculateExportableFinalWriteKey(clientKey, serverKey []byte, length int) [][]byte {
+	seed := []byte{}
+	seed = append(seed, serverData.ClientRandom...)
+	seed = append(seed, serverData.ServerRandom...)
+	// ssl 3.0 uses different seed for calculating server write key
+	extraSeed := []byte{}
+	extraSeed = append(extraSeed, serverData.ServerRandom...)
+	extraSeed = append(extraSeed, serverData.ClientRandom...)
+
+	result := make([][]byte, 0, 2)
+	switch binary.BigEndian.Uint16(serverData.Version) {
+	case 0x0300:
+		clientWriteKey := serverData.s3CalculateExportableFinalWriteKey(clientKey, seed, length)
+		serverWriteKey := serverData.s3CalculateExportableFinalWriteKey(serverKey, extraSeed, length)
+		result = append(result, clientWriteKey)
+		result = append(result, serverWriteKey)
+		return result
+	case 0x0301:
+		clientWriteKey := serverData.prf(clientKey, seed, []byte("client write key"), length)
+		serverWriteKey := serverData.prf(serverKey, seed, []byte("server write key"), length)
+		result = append(result, clientWriteKey)
+		result = append(result, serverWriteKey)
+		return result
+	}
+	fmt.Println("should never enter this state in prf")
+	os.Exit(1)
+	return [][]byte{}
+
+}
+
+func (serverData *ServerData) s3CalculateExportableFinalWriteKey(key, seed []byte, length int) []byte {
 	hash := md5.New()
 
 	hash.Write(key)
 	hash.Write(seed)
 
-	return hash.Sum(nil)
+	return hash.Sum(nil)[:length]
 
 }
 
-func (serverData *ServerData) calculateExportableFinalIv(seed []byte) []byte {
+func (serverData *ServerData) calculateExportableFinalIv(seed, serverSeed []byte) [][]byte {
+	result := make([][]byte, 0, 2)
+	switch binary.BigEndian.Uint16(serverData.Version) {
+	case 0x0300:
+		ivClient := serverData.s3CalculateExportableFinalIv(seed, serverData.CipherDef.Spec.IvSize)
+		ivServer := serverData.s3CalculateExportableFinalIv(serverSeed, serverData.CipherDef.Spec.IvSize)
+		result = append(result, ivClient)
+		result = append(result, ivServer)
+		return result
+	case 0x0301:
+		iv := serverData.prf([]byte{}, seed, []byte("IV block"), 2*serverData.CipherDef.Spec.IvSize)
+		result = append(result, iv[:serverData.CipherDef.Spec.IvSize])
+		result = append(result, iv[serverData.CipherDef.Spec.IvSize:])
+		return result
+	}
+	fmt.Println("should never enter this state in prf")
+	os.Exit(1)
+	return [][]byte{}
+
+}
+
+func (serverData *ServerData) s3CalculateExportableFinalIv(seed []byte, length int) []byte {
 	hash := md5.New()
 
 	hash.Write(seed)
 
-	return hash.Sum(nil)
+	return hash.Sum(nil)[:length]
 
 }
 
@@ -868,7 +926,7 @@ func (serverData *ServerData) prf(key, seed, label []byte, length int) []byte {
 	case 0x0301:
 		return T1Prf(key, seedExtended, length)
 	default:
-		fmt.Println("should never enter this state")
+		fmt.Println("should never enter this state in prf")
 		os.Exit(1)
 	}
 	return []byte{}
@@ -887,7 +945,7 @@ func (serverData *ServerData) SelectBlockCipherPadding() error {
 
 }
 
-func (serverData *ServerData) calculateKeyBlock(masterKey []byte) {
+func (serverData *ServerData) calculateKeyBlock(masterKey []byte) error {
 	keyBlockSeed := []byte{}
 	keyBlockSeed = append(keyBlockSeed, serverData.ServerRandom...)
 	keyBlockSeed = append(keyBlockSeed, serverData.ClientRandom...)
@@ -898,6 +956,10 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) {
 
 	macEndIndex := serverData.CipherDef.Spec.HashSize * 2
 	writeKeyEndIndex := macEndIndex + serverData.CipherDef.Spec.KeyMaterial*2
+
+	if len(keyBlock) < writeKeyEndIndex+serverData.CipherDef.Spec.IvSize*2 {
+		return fmt.Errorf("key block should be of at lest length: %v", writeKeyEndIndex+serverData.CipherDef.Spec.IvSize*2)
+	}
 
 	cipherDefKeys := cipher.CipherKeys{
 		MacClient:      keyBlock[:serverData.CipherDef.Spec.HashSize],
@@ -912,24 +974,45 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) {
 		clientSeed := []byte{}
 		clientSeed = append(clientSeed, serverData.ClientRandom...)
 		clientSeed = append(clientSeed, serverData.ServerRandom...)
-		clientWriteKey := serverData.calculateExportableFinalWriteKey(cipherDefKeys.WriteKeyClient, clientSeed)
-
 		serverSeed := []byte{}
 		serverSeed = append(serverSeed, serverData.ServerRandom...)
 		serverSeed = append(serverSeed, serverData.ClientRandom...)
-		serverWriteKey := serverData.calculateExportableFinalWriteKey(cipherDefKeys.WriteKeyServer, serverSeed)
+
+		clientWriteKeys := serverData.calculateExportableFinalWriteKey(cipherDefKeys.WriteKeyClient, cipherDefKeys.WriteKeyServer, serverData.CipherDef.Spec.ExportKeyMaterial)
+		clientWriteKey := clientWriteKeys[0]
+		serverWriteKey := clientWriteKeys[1]
+
+		if len(clientWriteKey) != serverData.CipherDef.Spec.ExportKeyMaterial {
+			return fmt.Errorf("client write key should be of length: %v, insted we got: %v", serverData.CipherDef.Spec.ExportKeyMaterial, len(clientWriteKey))
+		}
+
+		if len(serverWriteKey) != serverData.CipherDef.Spec.ExportKeyMaterial {
+			return fmt.Errorf("server write key should be of length: %v", serverData.CipherDef.Spec.ExportKeyMaterial)
+		}
 
 		cipherDefKeys.WriteKeyClient = clientWriteKey[:serverData.CipherDef.Spec.ExportKeyMaterial]
 		cipherDefKeys.WriteKeyServer = serverWriteKey[:serverData.CipherDef.Spec.ExportKeyMaterial]
 
-		IVClient := serverData.calculateExportableFinalIv(clientSeed)
-		IVServer := serverData.calculateExportableFinalIv(serverSeed)
+		iv := serverData.calculateExportableFinalIv(clientSeed, serverSeed)
+		if len(iv) < 2 {
+			return fmt.Errorf("export final iv should return two iv, client and server, insted it returned length: %v", len(iv))
+		}
 
-		cipherDefKeys.IVClient = IVClient[:serverData.CipherDef.Spec.IvSize]
-		cipherDefKeys.IVServer = IVServer[:serverData.CipherDef.Spec.IvSize]
+		if len(iv[0]) != serverData.CipherDef.Spec.IvSize {
+			return fmt.Errorf("client iv should be of length: %v, insted we got: %v", serverData.CipherDef.Spec.IvSize, len(iv[0]))
+		}
 
+		if len(iv[1]) != serverData.CipherDef.Spec.IvSize {
+			return fmt.Errorf("server iv should be of length: %v, insted we got: %v", serverData.CipherDef.Spec.IvSize, len(iv[1]))
+		}
+
+		cipherDefKeys.IVClient = iv[0]
+		cipherDefKeys.IVServer = iv[1]
 	}
+
 	serverData.CipherDef.Keys = cipherDefKeys
+
+	return nil
 }
 
 func (serverData *ServerData) changeCipher() error {
@@ -946,7 +1029,7 @@ func (serverData *ServerData) serverFinished() error {
 	serverData.IsServerEncrypted = true
 	label := finishedLabel[uint16(binary.BigEndian.Uint16(serverData.Version))]["server"]
 
-	verifyHashMac := serverData.generate_finished_handshake_mac(label, serverData.HandshakeMessages)
+	verifyHashMac := serverData.generateFinishedHandshakeMac(label, serverData.HandshakeMessages)
 
 	hashLen := len(verifyHashMac)
 	msgLenEndian, err := helpers.IntTo3BytesBigEndian(hashLen)
@@ -966,7 +1049,7 @@ func (serverData *ServerData) serverFinished() error {
 
 }
 
-func (serverData *ServerData) generate_finished_handshake_mac(label []byte, handshakeMessages [][]byte) []byte {
+func (serverData *ServerData) generateFinishedHandshakeMac(label []byte, handshakeMessages [][]byte) []byte {
 	switch binary.BigEndian.Uint16(serverData.Version) {
 	case 0x0300:
 		md5Hash := serverData.S3GenerateFinishedHandshakeMac(md5.New(), label, handshakeMessages) // -1 without last message witch is client verify
@@ -975,7 +1058,7 @@ func (serverData *ServerData) generate_finished_handshake_mac(label []byte, hand
 	case 0x0301:
 		return serverData.T1GenerateFinishedHandshakeMac(label, handshakeMessages)
 	default:
-		fmt.Println("should never enter this state")
+		fmt.Println("should never enter this state in generateFinishedHandshakeMac")
 		os.Exit(1)
 	}
 	return []byte{}
@@ -996,7 +1079,7 @@ func (serverData *ServerData) handleHandshakeClientFinished(contentData []byte) 
 
 	label := finishedLabel[uint16(binary.BigEndian.Uint16(serverData.Version))]["client"]
 
-	clientHash := serverData.generate_finished_handshake_mac(label, serverData.HandshakeMessages[:len(serverData.HandshakeMessages)-1])
+	clientHash := serverData.generateFinishedHandshakeMac(label, serverData.HandshakeMessages[:len(serverData.HandshakeMessages)-1])
 
 	hashLen := len(clientHash)
 

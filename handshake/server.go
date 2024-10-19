@@ -11,18 +11,18 @@ import (
 )
 
 type HttpServer struct {
-	Listener   net.Listener
-	Wg         *sync.WaitGroup
-	CertParam  *HttpServerCertParam
-	address    string
-	port       string
-	quit       chan interface{}
-	sslVersion []byte
+	Listener  net.Listener
+	Wg        *sync.WaitGroup
+	CertParam *HttpServerCertParam
+	address   string
+	port      string
+	quit      chan interface{}
+	Version   []byte
 }
+
 type HttpServerCertParam struct {
 	CertPath string
 	KeyPath  string
-	Version  *Version
 }
 
 type ServerData struct {
@@ -59,9 +59,9 @@ func WithCertificate(certParams *HttpServerCertParam) HttpServerOptions {
 	}
 }
 
-func WithSSLVersion(sslVersion []byte) HttpServerOptions {
+func WithSSLVersion(version []byte) HttpServerOptions {
 	return func(s *HttpServer) {
-		s.sslVersion = sslVersion
+		s.Version = version
 	}
 }
 
@@ -104,7 +104,7 @@ func (httpServer *HttpServer) startHttpServer() {
 	defer httpServer.Wg.Done()
 	for {
 
-		serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, Version: []byte{3, 1}, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: cipher.CipherDef{}}
+		serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, Version: httpServer.Version, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: cipher.CipherDef{}}
 
 		if (httpServer.CertParam) != nil {
 

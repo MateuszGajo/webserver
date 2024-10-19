@@ -690,11 +690,14 @@ func (serverData *ServerData) verifyCertificate(data []byte) (*x509.Certificate,
 	return cert, nil
 }
 
-func startServer(cert *HttpServerCertParam) *HttpServer {
+func startServer(cert *HttpServerCertParam, version Version) *HttpServer {
+	versionByte := make([]byte, 2)
+	binary.BigEndian.PutUint16(versionByte, uint16(version))
 
 	server, err := CreateServer(
 		WithAddress(Address, Port),
 		WithCertificate(cert),
+		WithSSLVersion(versionByte),
 	)
 
 	if err != nil {
@@ -720,7 +723,8 @@ func getOpenSslDir() string {
 }
 
 func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
-	server := startServer(nil)
+	version := []byte{3, 0}
+	server := startServer(nil, Version(binary.BigEndian.Uint16(version)))
 
 	defer StopServer(*server)
 
@@ -732,7 +736,7 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 
 	serverData := &ServerData{
 		ClientRandom: generateRandBytes(32),
-		Version:      []byte{3, 0},
+		Version:      version,
 		CipherDef: cipher.CipherDef{
 			Spec: cipher.CipherSpec{
 				HashAlgorithm:       cipher.HashAlgorithmSHA,
@@ -742,6 +746,7 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 				IvSize:              8,
 				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
 				SignatureAlgorithm:  cipher.SignatureAlgorithmAnonymous,
+				PaddingType:         cipher.ZerosPaddingType,
 			},
 			CipherSuite: 0x001B,
 		},
@@ -842,10 +847,11 @@ func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
 }
 
 func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
+	version := []byte{3, 0}
 
-	params := generateRsaCert(false)
+	genCert := generateRsaCert(false)
 
-	server := startServer(params)
+	server := startServer(genCert, Version(binary.BigEndian.Uint16(version)))
 
 	defer StopServer(*server)
 
@@ -857,7 +863,7 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 
 	serverData := &ServerData{
 		ClientRandom: generateRandBytes(32),
-		Version:      []byte{3, 0},
+		Version:      version,
 		CipherDef: cipher.CipherDef{
 			Spec: cipher.CipherSpec{
 				HashAlgorithm:       cipher.HashAlgorithmSHA,
@@ -867,6 +873,7 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 				IvSize:              8,
 				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
 				SignatureAlgorithm:  cipher.SignatureAlgorithmRSA,
+				PaddingType:         cipher.ZerosPaddingType,
 			},
 			CipherSuite: uint16(cipher.CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA),
 		},
@@ -977,9 +984,10 @@ func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 }
 
 func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert(false)
+	genCert := generateRsaCert(false)
 
-	server := startServer(params)
+	version := []byte{3, 0}
+	server := startServer(genCert, Version(binary.BigEndian.Uint16(version)))
 
 	defer StopServer(*server)
 
@@ -991,7 +999,7 @@ func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
 
 	serverData := &ServerData{
 		ClientRandom: generateRandBytes(32),
-		Version:      []byte{3, 0},
+		Version:      version,
 		CipherDef: cipher.CipherDef{
 			Spec: cipher.CipherSpec{
 				HashAlgorithm:       cipher.HashAlgorithmSHA,
@@ -1001,13 +1009,14 @@ func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
 				IvSize:              8,
 				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
 				SignatureAlgorithm:  cipher.SignatureAlgorithmRSA,
+				PaddingType:         cipher.ZerosPaddingType,
 			},
 			CipherSuite: uint16(cipher.CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA),
 		},
 		ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
 	}
 
-	_, err = serverData.parseCertificate(params.CertPath, params.KeyPath)
+	_, err = serverData.parseCertificate(genCert.CertPath, genCert.KeyPath)
 
 	if err != nil {
 		t.Errorf("\n cant parse ceritifcate, err: %v", err)
@@ -1122,9 +1131,9 @@ func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
 }
 
 func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
-	params := generateDSsCert()
-
-	server := startServer(params)
+	genCert := generateDSsCert()
+	version := []byte{3, 0}
+	server := startServer(genCert, Version(binary.BigEndian.Uint16(version)))
 
 	defer StopServer(*server)
 
@@ -1136,7 +1145,7 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 
 	serverData := &ServerData{
 		ClientRandom: generateRandBytes(32),
-		Version:      []byte{3, 0},
+		Version:      version,
 		CipherDef: cipher.CipherDef{
 			Spec: cipher.CipherSpec{
 				HashAlgorithm:       cipher.HashAlgorithmSHA,
@@ -1146,6 +1155,7 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 				IvSize:              8,
 				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
 				SignatureAlgorithm:  cipher.SignatureAlgorithmDSA,
+				PaddingType:         cipher.ZerosPaddingType,
 			},
 			CipherSuite: uint16(cipher.CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA),
 		},
@@ -1253,8 +1263,21 @@ func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 
 }
 
-func runOpensslCommand(cipher string) error {
-	cmd := exec.Command("./openssl", "s_client", "-connect", Address+":"+Port, "-ssl3", "-cipher", cipher, "-reconnect")
+func runOpensslCommand(args []string) error {
+	cmdArgs := []string{"s_client"}
+	cmdArgs = append(cmdArgs, "-connect")
+	cmdArgs = append(cmdArgs, Address+":"+Port)
+	cmdArgs = append(cmdArgs, args...)
+
+	cmd := exec.Command("./openssl", cmdArgs...)
+
+	var cipher string
+
+	for i, v := range args {
+		if v == "-cipher" {
+			cipher = args[i+1]
+		}
+	}
 
 	cmd.Dir = getOpenSslDir()
 
@@ -1274,209 +1297,208 @@ func runOpensslCommand(cipher string) error {
 	return nil
 }
 
-func TestHandshakeOpenSSL_ADH_DES_CBC3_SHA(t *testing.T) {
+func TestHandshakeOpenS3_ADH_DES_CBC3_SHA(t *testing.T) {
 	params := generateRsaCert(false)
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("ADH-DES-CBC3-SHA"); err != nil {
-		t.Error(err)
-	}
-
-}
-func TestHandshakeOpenSSL_ADH_DES_CBC_SHA(t *testing.T) {
-	params := generateRsaCert(false)
-
-	server := startServer(params)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand("ADH-DES-CBC-SHA"); err != nil {
-		t.Error(err)
-	}
-
-}
-
-func TestHandshakeOpenSSL_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert(false)
-
-	server := startServer(params)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand("EDH-RSA-DES-CBC3-SHA"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "ADH-DES-CBC3-SHA", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 }
-
-func TestHandshakeOpenSSL_EDH_RSA_DES_CBC_SHA(t *testing.T) {
+func TestHandshakeOpenS3_ADH_DES_CBC_SHA(t *testing.T) {
 	params := generateRsaCert(false)
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("EDH-RSA-DES-CBC-SHA"); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestHandshakeOpenSSL_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert(false)
-
-	server := startServer(params)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand("DES-CBC3-SHA"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "ADH-DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 
 }
 
-func TestHandshakeOpenSSL_DES_CBC_SHA(t *testing.T) {
+func TestHandshakeOpenS3_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 	params := generateRsaCert(false)
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("DES-CBC-SHA"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "EDH-RSA-DES-CBC3-SHA", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 
 }
 
-func TestHandshakeOpenSSL_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
+func TestHandshakeOpenS3_EDH_RSA_DES_CBC_SHA(t *testing.T) {
+	params := generateRsaCert(false)
+
+	server := startServer(params, SSL30Version)
+
+	defer StopServer(*server)
+
+	if err := runOpensslCommand([]string{"-cipher", "EDH-RSA-DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestHandshakeOpenS3_DES_CBC3_SHA(t *testing.T) {
+	params := generateRsaCert(false)
+
+	server := startServer(params, SSL30Version)
+
+	defer StopServer(*server)
+
+	if err := runOpensslCommand([]string{"-cipher", "DES-CBC3-SHA", "-ssl3", "-reconnect"}); err != nil {
+		t.Error(err)
+	}
+
+}
+
+func TestHandshakeOpenS3_DES_CBC_SHA(t *testing.T) {
+	params := generateRsaCert(false)
+
+	server := startServer(params, SSL30Version)
+
+	defer StopServer(*server)
+
+	if err := runOpensslCommand([]string{"-cipher", "DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
+		t.Error(err)
+	}
+
+}
+
+func TestHandshakeOpenS3_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
 	params := generateDSsCert()
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("EDH-DSS-DES-CBC3-SHA"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "EDH-DSS-DES-CBC3-SHA", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 }
 
-func TestHandshakeOpenSSL_EDH_DSS_DES_CBC_SHA(t *testing.T) {
+func TestHandshakeOpenS3_EDH_DSS_DES_CBC_SHA(t *testing.T) {
 	params := generateDSsCert()
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("EDH-DSS-DES-CBC-SHA"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "EDH-DSS-DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 }
 
-func TestHandshakeOpenSSL_EXP_EDH_RSA_DES_CBC_SHA(t *testing.T) {
+func TestHandshakeOpenS3_EXP_EDH_RSA_DES_CBC_SHA(t *testing.T) {
 	params := generateRsaCert(false)
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("EXP-EDH-RSA-DES-CBC-SHA"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "EXP-EDH-RSA-DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 
 }
 
-func TestHandshakeOpenSSL_EXP_EDH_DSS_DES_CBC_SHA(t *testing.T) {
+func TestHandshakeOpenS3_EXP_EDH_DSS_DES_CBC_SHA(t *testing.T) {
 	params := generateDSsCert()
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("EXP-EDH-DSS-DES-CBC-SHA"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "EXP-EDH-DSS-DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestHandshakeOpenS3_EXP_DES_CBC_SHA(t *testing.T) {
+	params := generateRsaCert(true)
+
+	server := startServer(params, SSL30Version)
+	defer StopServer(*server)
+
+	if err := runOpensslCommand([]string{"-cipher", "EXP-DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 
 }
 
-func TestHandshakeOpenSSL_EXP_DES_CBC_SHA(t *testing.T) {
+func TestHandshakeOpenS3_RC4_SHA(t *testing.T) {
 	params := generateRsaCert(true)
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("EXP-DES-CBC-SHA"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "RC4-SHA", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 
 }
 
-func TestHandshakeOpenSSL_RC4_SHA(t *testing.T) {
+func TestHandshakeOpenS3_RC4_MD5(t *testing.T) {
 	params := generateRsaCert(true)
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("RC4-SHA"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "RC4-MD5", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 
 }
 
-func TestHandshakeOpenSSL_RC4_MD5(t *testing.T) {
+func TestHandshakeOpenS3_EXP_RC4_MD5(t *testing.T) {
 	params := generateRsaCert(true)
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("RC4-MD5"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "EXP-RC4-MD5", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 
 }
 
-func TestHandshakeOpenSSL_EXP_RC4_MD5(t *testing.T) {
+func TestHandshakeOpenS3_ADH_RC4_MD5(t *testing.T) {
 	params := generateRsaCert(true)
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("EXP-RC4-MD5"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "ADH-RC4-MD5", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 
 }
 
-func TestHandshakeOpenSSL_ADH_RC4_MD5(t *testing.T) {
+func TestHandshakeOpenS3_EXP_ADH_RC4_MD5(t *testing.T) {
 	params := generateRsaCert(true)
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("ADH-RC4-MD5"); err != nil {
-		t.Error(err)
-	}
-
-}
-
-func TestHandshakeOpenSSL_EXP_ADH_RC4_MD5(t *testing.T) {
-	params := generateRsaCert(true)
-
-	server := startServer(params)
-	defer StopServer(*server)
-
-	if err := runOpensslCommand("EXP-ADH-RC4-MD5"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "EXP-ADH-RC4-MD5", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 }
 
-func TestHandshakeOpenSSL_EXP_RC2_CBC_MD5(t *testing.T) {
+func TestHandshakeOpenS3_EXP_RC2_CBC_MD5(t *testing.T) {
 	params := generateRsaCert(true)
 
-	server := startServer(params)
+	server := startServer(params, SSL30Version)
 	defer StopServer(*server)
 
-	if err := runOpensslCommand("EXP-RC2-CBC-MD5"); err != nil {
+	if err := runOpensslCommand([]string{"-cipher", "EXP-RC2-CBC-MD5", "-ssl3", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 

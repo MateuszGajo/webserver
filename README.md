@@ -2,7 +2,7 @@
 ## Descrription
 PROJECT IN DEVELOPMENT PHASE! Don't use in production.
 
-## Supported ciphers
+## Supported ciphers ssl 3.0
 Project supports following ciphers of ssl 3.0 (based on rfc 6101):
 * EDH-DSS-DES-CBC3-SHA
 * EDH-DSS-DES-CBC-SHA
@@ -25,7 +25,16 @@ Project supports following ciphers of ssl 3.0 (based on rfc 6101):
 * EXP-RC2-CBC-MD5
 Other ciphers can work but hasn't been tested yet.
 
+
 *All fortezza ciphers are not implemented in ssl 3.0.
+
+## Supported ciphers tls 1.0
+Project supports following ciphers of tls1.0 (based on rfc --------):
+* ADH-DES-CBC3-SHA
+* ADH-DES-CBC-SHA
+* ADH-RC4-MD5
+* EXP-ADH-RC4-MD5
+
 
 ## Supported features
 * session resumption

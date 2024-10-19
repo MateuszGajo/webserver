@@ -48,23 +48,27 @@ func (serverData *ServerData) T1GenerateFinishedHandshakeMac(label []byte, hands
 // Why xor? Two differents keys could in some cases producte the same internal state when hashed with the message, leading to a mac collision, This is because concatenation does not ensure a unifoorm distrubtion of key bits across blocks.
 // https://crypto.stackexchange.com/questions/12680/how-does-the-secret-key-in-an-hmac-prevent-modification-of-the-hmac
 
-func pHash(hash func() hash.Hash, secret, seed []byte, iteration int) []byte {
+func pHash(hash func() hash.Hash, secret, seed []byte, length int) []byte {
 	h := hmac.New(hash, secret)
 	h.Write(seed)
 	a := h.Sum(nil)
 	sum := []byte{}
 
-	for i := 0; i < iteration; i++ {
+	for {
 		h.Reset()
 		h.Write(a)
 		h.Write(seed)
 		sum = append(sum, h.Sum(nil)...)
 
+		if len(sum) >= length {
+			return sum
+		}
+
 		h.Reset()
 		h.Write(a)
 		a = h.Sum(nil)
 	}
-	return sum
+	// return sum
 }
 
 func T1Prf(secret, seed []byte, req_len int) []byte {
@@ -75,11 +79,8 @@ func T1Prf(secret, seed []byte, req_len int) []byte {
 	}
 	secondHalfSecret := secret[secretHalfLength:]
 
-	iterationCountSha := (req_len + sha1.New().Size() - 1) / sha1.New().Size()
-	iterationCountMd5 := (req_len + md5.New().Size() - 1) / md5.New().Size()
-
-	md5Hash := pHash(md5.New, firstHalfSecret, seed, iterationCountMd5)
-	shaHash := pHash(sha1.New, secondHalfSecret, seed, iterationCountSha)
+	md5Hash := pHash(md5.New, firstHalfSecret, seed, req_len)
+	shaHash := pHash(sha1.New, secondHalfSecret, seed, req_len)
 
 	for i := range md5Hash[:req_len] {
 		md5Hash[i] ^= shaHash[i]

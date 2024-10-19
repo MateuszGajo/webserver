@@ -514,7 +514,7 @@ func (cipherDef *CipherDef) addPadding(src []byte, blockSize int) []byte {
 	case ZerosPaddingType:
 		return zerosPadding(src, blockSize)
 	}
-	fmt.Println("Should never enter this state")
+	fmt.Println("Should never enter this state in addPadding")
 	os.Exit(1)
 	return []byte{}
 }
