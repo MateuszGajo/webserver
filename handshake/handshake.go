@@ -132,15 +132,26 @@ const (
 	AlertDescriptionCloseNotify            AlertDescription = 0
 	AlertDescriptionUnexpectedMessage      AlertDescription = 10
 	AlertDescriptionBadRecordMac           AlertDescription = 20
+	AlertDescriptionDecryptionFailed       AlertDescription = 21
+	AlertDescriptionRecordOverflow         AlertDescription = 22
 	AlertDescriptionDecompressionFailure   AlertDescription = 30
 	AlertDescriptionHandshakeFailure       AlertDescription = 40
-	AlertDescriptionNoCertificate          AlertDescription = 41
 	AlertDescriptionBadCertificate         AlertDescription = 42
 	AlertDescriptionUnsupportedCertificate AlertDescription = 43
 	AlertDescriptionCertificateRevoked     AlertDescription = 44
 	AlertDescriptionCertificateExpired     AlertDescription = 45
 	AlertDescriptionCertificateUnknown     AlertDescription = 46
 	AlertDescriptionIllegalParameter       AlertDescription = 47
+	AlertDescriptionUnknownCA              AlertDescription = 48
+	AlertDescriptionAccessDenided          AlertDescription = 49
+	AlertDescriptionDecodeError            AlertDescription = 50
+	AlertDescriptionDecryptError           AlertDescription = 51
+	AlertDescriptionExportRestriction      AlertDescription = 60
+	AlertDescriptionProtocolVersion        AlertDescription = 70
+	AlertDescriptionInsufficientSecuirty   AlertDescription = 71
+	AlertDescriptionInternalError          AlertDescription = 80
+	AlertDescriptionUserCancceled          AlertDescription = 90
+	AlertDescriptionNoRenegotation         AlertDescription = 100
 )
 
 const MASTER_SECRET_LENGTH = 48
@@ -237,7 +248,7 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) err
 		decryptedClientData, err := serverData.CipherDef.DecryptMessage(clientData[5:], serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient)
 
 		if err != nil {
-			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionBadRecordMac)
+			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionDecryptionFailed)
 			return fmt.Errorf("\n Decryption failed: %v", err)
 		}
 
@@ -359,10 +370,7 @@ func (serverData *ServerData) handleAlert(contentData []byte) {
 		// Handshake process failed, ensure that server and browser supports required protocol and ciphers, may indicate problem with server configuration
 		// Always fatal
 		fmt.Print("Handshake failure, make sure choose procol and ciphers are supported by both parties")
-	case AlertDescriptionNoCertificate:
-		// No certificate was provided by the peer
-		// Optional field
-		fmt.Print("No certificate provided")
+
 	case AlertDescriptionBadCertificate:
 		// Bad certificate
 		fmt.Print("Make sure that provided cerificate is valid")
@@ -395,7 +403,47 @@ func (serverData *ServerData) handleAlert(contentData []byte) {
 		// 3. Incorrected exntesion
 		// 4. Invalid message structure
 		fmt.Print("Illegal paramters, check tls version, supported protcol, extenstion or message structure")
-
+	case AlertDescriptionDecryptionFailed:
+		// Corrupted data
+		// Invalid padding
+		// Invalid key
+		// Mac compromised
+		fmt.Print("Decryptio failed")
+	case AlertDescriptionRecordOverflow:
+		// Overflowed limit of 16.384 bytes
+		fmt.Print("Record overflowed")
+	case AlertDescriptionUnknownCA:
+		// UnknownCA
+		fmt.Print("Unknown cert CA")
+	case AlertDescriptionAccessDenided:
+		// Access denied, no permission
+		// Rejected client cert
+		fmt.Print("Access Denied")
+	case AlertDescriptionDecodeError:
+		// Message incorrectly formatted
+		// Corupted data
+		fmt.Print("Decode error")
+	case AlertDescriptionDecryptError:
+		// 	Decryption of a message failed, often due to a key mismatch or improper encryption mechanism.
+		// The MAC (Message Authentication Code) was incorrect, meaning the integrity check failed.
+		fmt.Print("Decrypt error")
+	case AlertDescriptionExportRestriction:
+		// Can't use exported cipher
+		fmt.Print("Export restirction")
+	case AlertDescriptionProtocolVersion:
+		// Client and server do not support common veersion
+		// Reject older version by newer clients
+		fmt.Print("Protocol version")
+	case AlertDescriptionInsufficientSecuirty:
+		// Weak cipher suite
+		fmt.Print("Infufficient security")
+	case AlertDescriptionInternalError:
+		// Just internal error
+		fmt.Print("Internal error")
+	case AlertDescriptionNoRenegotation:
+		// 	One of the parties requested to renegotiate the TLS session, but the other party refused.
+		// Some servers or clients may disable renegotiation for security reasons
+		fmt.Print("No renegotation")
 	default:
 		fmt.Printf("Unregonized alert occured: %v", alertDescription)
 	}
@@ -410,19 +458,19 @@ func (serverData *ServerData) loadCertificate() error {
 
 	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(len(serverData.cert) + 3 + 3)
 	if err != nil {
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
 		return errors.New("problem converting record layer length to big endina")
 	}
 
 	certLengthByte, err := helpers.IntTo3BytesBigEndian(len(serverData.cert) + 3)
 	if err != nil {
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
 		return errors.New("problem converting certs length to big endian")
 	}
 
 	certLengthByteSingle, err := helpers.IntTo3BytesBigEndian(len(serverData.cert))
 	if err != nil {
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
 		return errors.New("problem converting cert length to big endian")
 	}
 
@@ -662,7 +710,7 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 	serverData.ClientRandom = contentData[6:38]
 	err := serverData.CipherDef.SelectCipherSuite(cipherSuites)
 	if err != nil {
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInsufficientSecuirty)
 		return fmt.Errorf("problem selecting cipher suite, err: %v", err)
 	}
 	serverData.CipherDef.GetCipherSpecInfo()
@@ -716,7 +764,7 @@ func (serverData *ServerData) serverKeyExchange() error {
 	signatureLength := helpers.Int32ToBigEndian(len(signedParams))
 
 	if err != nil {
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
 		return fmt.Errorf("problem with singin data, err: %v", err)
 	}
 
@@ -754,7 +802,7 @@ func (serverData *ServerData) serverHello() error {
 	_, err := rand.Read(randomBytes)
 
 	if err != nil {
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
 		return fmt.Errorf("problem generating random bytes, err:%v", err)
 	}
 
@@ -1038,7 +1086,7 @@ func (serverData *ServerData) serverFinished() error {
 	msgLenEndian, err := helpers.IntTo3BytesBigEndian(hashLen)
 
 	if err != nil {
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
 		return fmt.Errorf("problem converting hash len into endian format")
 	}
 
