@@ -1,7 +1,6 @@
 package handshake
 
 import (
-	"crypto/dsa"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/rsa"
@@ -298,7 +297,7 @@ func (serverData *ServerData) verifyServerHelloDone(data []byte) error {
 }
 
 func (serverData *ServerData) computeKeys(data []byte) error {
-	preMasterSecret, err := serverData.CipherDef.ComputerMasterSecret(data)
+	preMasterSecret, err := serverData.CipherDef.ComputeMasterSecret(data)
 	if err != nil {
 		return err
 	}
@@ -722,547 +721,6 @@ func getOpenSslDir() string {
 	return filepath.Join(dir, "../openssl", OpenSSLVersion, "apps")
 }
 
-func TestHandshake_ADH_DES_CBC3_SHA(t *testing.T) {
-	version := []byte{3, 0}
-	server := startServer(nil, Version(binary.BigEndian.Uint16(version)))
-
-	defer StopServer(*server)
-
-	conn, err := net.Dial("tcp", Address+":"+Port)
-
-	if err != nil {
-		t.Errorf("problem connecting to server, err:%v", err)
-	}
-
-	serverData := &ServerData{
-		ClientRandom: generateRandBytes(32),
-		Version:      version,
-		CipherDef: cipher.CipherDef{
-			Spec: cipher.CipherSpec{
-				HashAlgorithm:       cipher.HashAlgorithmSHA,
-				KeyExchange:         cipher.KeyExchangeMethodDH,
-				HashSize:            20,
-				KeyMaterial:         24,
-				IvSize:              8,
-				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
-				SignatureAlgorithm:  cipher.SignatureAlgorithmAnonymous,
-				PaddingType:         cipher.ZerosPaddingType,
-			},
-			CipherSuite: 0x001B,
-		},
-		ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
-	}
-	clientHello := serverData.generateClientHello()
-
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientHello[5:])
-
-	_, err = conn.Write(clientHello)
-
-	if err != nil {
-		t.Errorf("problem writing client hello msg, err: %v", err)
-	}
-
-	data, err := serverData.readNMessage(3, conn)
-
-	if err != nil {
-		t.Errorf("problem reading server hello messages, expected to read 3 msgs, err: %v", err)
-	}
-
-	if len(data) < 3 {
-		fmt.Printf("data should be of length: 3, data: %v", data)
-		os.Exit(1)
-	}
-
-	serverHello := data[0]
-	serverKeyExchange := data[1]
-	serverHelloDone := data[2]
-
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHello[5:])
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverKeyExchange[5:])
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHelloDone[5:])
-
-	err = serverData.verifyServerHello(serverHello)
-
-	if err != nil {
-		t.Errorf("\n Problem with serverHello msg, err: %v", err)
-	}
-
-	err = serverData.verifyServerKeyExchange(serverKeyExchange)
-
-	if err != nil {
-		t.Errorf("\n Problem with serverKeyExchange msg, err: %v", err)
-	}
-
-	err = serverData.verifyServerHelloDone(serverHelloDone)
-
-	if err != nil {
-		t.Errorf("\n Problem with serverKeyExchange msg, err: %v", err)
-	}
-
-	private := big.NewInt(3)
-
-	serverData.CipherDef.DhParams.Private = private
-
-	serverData.computeKeys([]byte{0, 1, 2})
-
-	clientKeyExchangeMsg := []byte{22, 3, 0, 0, 7, 16, 0, 0, 3, 0, 1, 2}
-	clientChangeCipher := []byte{20, 3, 0, 0, 1, 1}
-
-	conn.Write(clientKeyExchangeMsg)
-	conn.Write(clientChangeCipher)
-
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientKeyExchangeMsg[5:])
-
-	finishedMsg, err := serverData.generateClientFinishedMsg()
-	if err != nil {
-		t.Error(err)
-	}
-	_, err = conn.Write(finishedMsg)
-
-	if err != nil {
-		t.Errorf("Problem writing client finished messgae :%v", err)
-	}
-
-	data, err = serverData.readNMessage(2, conn)
-
-	if err != nil {
-		t.Errorf("Problem reading server finished and change cipher msgs, err: %v", err)
-	}
-
-	serverChangeCipher := data[0]
-	serverFinished := data[1]
-
-	err = serverData.verifyServerChangeCipher(serverChangeCipher)
-
-	if err != nil {
-		t.Errorf("Problem with verify server change cipher msg:%v", err)
-	}
-
-	err = serverData.verifyServerFinished(serverFinished)
-
-	if err != nil {
-		t.Errorf("Problem with verify server finished %v", err)
-	}
-
-}
-
-func TestHandshake_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
-	version := []byte{3, 0}
-
-	genCert := generateRsaCert(false)
-
-	server := startServer(genCert, Version(binary.BigEndian.Uint16(version)))
-
-	defer StopServer(*server)
-
-	conn, err := net.Dial("tcp", Address+":"+Port)
-
-	if err != nil {
-		t.Errorf("problem connecting to server, err:%v", err)
-	}
-
-	serverData := &ServerData{
-		ClientRandom: generateRandBytes(32),
-		Version:      version,
-		CipherDef: cipher.CipherDef{
-			Spec: cipher.CipherSpec{
-				HashAlgorithm:       cipher.HashAlgorithmSHA,
-				KeyExchange:         cipher.KeyExchangeMethodDH,
-				HashSize:            20,
-				KeyMaterial:         24,
-				IvSize:              8,
-				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
-				SignatureAlgorithm:  cipher.SignatureAlgorithmRSA,
-				PaddingType:         cipher.ZerosPaddingType,
-			},
-			CipherSuite: uint16(cipher.CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA),
-		},
-		ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
-	}
-	clientHello := serverData.generateClientHello()
-
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientHello[5:])
-
-	_, err = conn.Write(clientHello)
-
-	// t.Errorf("fdfddfs")
-
-	if err != nil {
-		t.Errorf("Problem writing client hello, err: %v", err)
-	}
-
-	data, err := serverData.readNMessage(4, conn)
-
-	if err != nil {
-		t.Errorf("Problem reading server hello msgs, expected to read 4 messages, err: %v", err)
-	}
-
-	serverHello := data[0]
-	certificate := data[1]
-
-	serverKeyExchange := data[2]
-	serverHelloDone := data[3]
-
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHello[5:])
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, certificate[5:])
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverKeyExchange[5:])
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHelloDone[5:])
-
-	err = serverData.verifyServerHello(serverHello)
-
-	if err != nil {
-		t.Errorf("\n Problem with serverHello msg, err: %v", err)
-	}
-
-	cert, err := serverData.verifyCertificate(certificate)
-
-	if err != nil {
-		t.Errorf("\n Problem with cserver ertificate msg, err: %v", err)
-	}
-
-	pubKey, ok := cert.PublicKey.(*rsa.PublicKey)
-
-	if !ok {
-		t.Error("\n can convert pubkey to rsa pub key")
-	}
-
-	serverData.CipherDef.Rsa.PublicKey = pubKey
-
-	err = serverData.verifyServerKeyExchange(serverKeyExchange)
-
-	if err != nil {
-		t.Errorf("\n Problem with serverKeyExchange msg, err: %v", err)
-	}
-
-	err = serverData.verifyServerHelloDone(serverHelloDone)
-	if err != nil {
-		t.Errorf("\n Problem with serverKeyExchange msg, err: %v", err)
-	}
-
-	private := big.NewInt(3)
-
-	serverData.CipherDef.DhParams.Private = private
-
-	clientKeyExchangeMsg := []byte{22, 3, 0, 0, 7, 16, 0, 0, 3, 0, 1, 2}
-	serverData.computeKeys([]byte{0, 1, 2})
-	clientChangeCipher := []byte{20, 3, 0, 0, 1, 1}
-
-	conn.Write(clientKeyExchangeMsg)
-	conn.Write(clientChangeCipher)
-
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientKeyExchangeMsg[5:])
-
-	finishedMsg, err := serverData.generateClientFinishedMsg()
-	if err != nil {
-		t.Error(err)
-	}
-	_, err = conn.Write(finishedMsg)
-	if err != nil {
-		t.Errorf("Problem writing client finished messgae :%v", err)
-	}
-
-	data, err = serverData.readNMessage(2, conn)
-	if err != nil {
-		t.Errorf("Problem reading server chage cipher and server finished msgs, err: %v", err)
-	}
-
-	serverChangeCipher := data[0]
-	serverFinished := data[1]
-
-	err = serverData.verifyServerChangeCipher(serverChangeCipher)
-
-	if err != nil {
-		t.Errorf("Problem with verify server change cipher msg:%v", err)
-	}
-
-	err = serverData.verifyServerFinished(serverFinished)
-
-	if err != nil {
-		t.Errorf("Problem with verify server finished %v", err)
-	}
-
-}
-
-func TestHandshake_RSA_DES_CBC3_SHA(t *testing.T) {
-	genCert := generateRsaCert(false)
-
-	version := []byte{3, 0}
-	server := startServer(genCert, Version(binary.BigEndian.Uint16(version)))
-
-	defer StopServer(*server)
-
-	conn, err := net.Dial("tcp", Address+":"+Port)
-
-	if err != nil {
-		t.Errorf("problem connecting to server, err:%v", err)
-	}
-
-	serverData := &ServerData{
-		ClientRandom: generateRandBytes(32),
-		Version:      version,
-		CipherDef: cipher.CipherDef{
-			Spec: cipher.CipherSpec{
-				HashAlgorithm:       cipher.HashAlgorithmSHA,
-				KeyExchange:         cipher.KeyExchangeMethodRSA,
-				HashSize:            20,
-				KeyMaterial:         24,
-				IvSize:              8,
-				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
-				SignatureAlgorithm:  cipher.SignatureAlgorithmRSA,
-				PaddingType:         cipher.ZerosPaddingType,
-			},
-			CipherSuite: uint16(cipher.CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA),
-		},
-		ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
-	}
-
-	_, err = serverData.parseCertificate(genCert.CertPath, genCert.KeyPath)
-
-	if err != nil {
-		t.Errorf("\n cant parse ceritifcate, err: %v", err)
-	}
-
-	clientHello := serverData.generateClientHello()
-
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientHello[5:])
-
-	_, err = conn.Write(clientHello)
-
-	if err != nil {
-		t.Errorf("Problem writing client hello, err: %v", err)
-	}
-
-	data, err := serverData.readNMessage(3, conn)
-
-	if err != nil {
-		t.Errorf("Problem reading server hello msgs, expected to read 4 messages, err: %v", err)
-	}
-
-	serverHello := data[0]
-	certificate := data[1]
-	serverHelloDone := data[2]
-
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHello[5:])
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, certificate[5:])
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHelloDone[5:])
-
-	err = serverData.verifyServerHello(serverHello)
-
-	if err != nil {
-		t.Errorf("\n Problem with serverHello msg, err: %v", err)
-	}
-
-	cert, err := serverData.verifyCertificate(certificate)
-
-	if err != nil {
-		t.Errorf("\n Problem with cserver ertificate msg, err: %v", err)
-	}
-
-	err = serverData.verifyServerHelloDone(serverHelloDone)
-	if err != nil {
-		t.Errorf("\n Problem with serverKeyExchange msg, err: %v", err)
-	}
-
-	pubKey := cert.PublicKey
-
-	pubRsaKey, ok := pubKey.(*rsa.PublicKey)
-
-	if !ok {
-		t.Errorf("\n can't convert pubKey to rsa pub key, err: %v", err)
-	}
-
-	preMasterKey := []byte{3, 0}
-	preMasterKey = append(preMasterKey, generateRandBytes(46)...)
-
-	decrypted, err := rsa.EncryptPKCS1v15(rand.Reader, pubRsaKey, preMasterKey)
-
-	if err != nil {
-		t.Errorf("cant encrypted pre masterkey, err: %v", err)
-	}
-
-	clientKeyExchangeMsg := []byte{22, 3, 0}
-	recordLength := helpers.Int32ToBigEndian(len(decrypted) + 4)
-	clientKeyExchangeMsg = append(clientKeyExchangeMsg, recordLength...)
-	clientKeyExchangeMsg = append(clientKeyExchangeMsg, 16)
-	contentLength, err := helpers.IntTo3BytesBigEndian(len(decrypted))
-	if err != nil {
-		t.Errorf("cant convert decrypted len to big endian, err:%v", err)
-	}
-	clientKeyExchangeMsg = append(clientKeyExchangeMsg, contentLength...)
-	clientKeyExchangeMsg = append(clientKeyExchangeMsg, decrypted...)
-	clientChangeCipher := []byte{20, 3, 0, 0, 1, 1}
-	serverData.computeKeys(clientKeyExchangeMsg[9:])
-
-	conn.Write(clientKeyExchangeMsg)
-	conn.Write(clientChangeCipher)
-
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientKeyExchangeMsg[5:])
-
-	finishedMsg, err := serverData.generateClientFinishedMsg()
-	if err != nil {
-		t.Error(err)
-	}
-	_, err = conn.Write(finishedMsg)
-
-	if err != nil {
-		t.Errorf("Problem writing client finished messgae :%v", err)
-	}
-
-	data, err = serverData.readNMessage(2, conn)
-	if err != nil {
-		t.Errorf("Problem reading server chage cipher and server finished msgs, err: %v", err)
-	}
-
-	serverChangeCipher := data[0]
-	serverFinished := data[1]
-
-	err = serverData.verifyServerChangeCipher(serverChangeCipher)
-
-	if err != nil {
-		t.Errorf("Problem with verify server change cipher msg:%v", err)
-	}
-
-	err = serverData.verifyServerFinished(serverFinished)
-
-	if err != nil {
-		t.Errorf("Problem with verify server finished %v", err)
-	}
-
-}
-
-func TestHandshake_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
-	genCert := generateDSsCert()
-	version := []byte{3, 0}
-	server := startServer(genCert, Version(binary.BigEndian.Uint16(version)))
-
-	defer StopServer(*server)
-
-	conn, err := net.Dial("tcp", Address+":"+Port)
-
-	if err != nil {
-		t.Errorf("problem connecting to server, err:%v", err)
-	}
-
-	serverData := &ServerData{
-		ClientRandom: generateRandBytes(32),
-		Version:      version,
-		CipherDef: cipher.CipherDef{
-			Spec: cipher.CipherSpec{
-				HashAlgorithm:       cipher.HashAlgorithmSHA,
-				KeyExchange:         cipher.KeyExchangeMethodDH,
-				HashSize:            20,
-				KeyMaterial:         24,
-				IvSize:              8,
-				EncryptionAlgorithm: cipher.EncryptionAlgorithm3DES,
-				SignatureAlgorithm:  cipher.SignatureAlgorithmDSA,
-				PaddingType:         cipher.ZerosPaddingType,
-			},
-			CipherSuite: uint16(cipher.CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA),
-		},
-		ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0},
-	}
-	clientHello := serverData.generateClientHello()
-
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientHello[5:])
-
-	_, err = conn.Write(clientHello)
-
-	if err != nil {
-		t.Errorf("Problem writing client hello, err: %v", err)
-	}
-
-	data, err := serverData.readNMessage(4, conn)
-
-	if err != nil {
-		t.Errorf("Problem reading server hello msgs, expected to read 4 messages, err: %v", err)
-	}
-
-	serverHello := data[0]
-	certificate := data[1]
-
-	serverKeyExchange := data[2]
-	serverHelloDone := data[3]
-
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHello[5:])
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, certificate[5:])
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverKeyExchange[5:])
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, serverHelloDone[5:])
-
-	err = serverData.verifyServerHello(serverHello)
-
-	if err != nil {
-		t.Errorf("\n Problem with serverHello msg, err: %v", err)
-	}
-
-	cert, err := serverData.verifyCertificate(certificate)
-
-	if err != nil {
-		t.Errorf("\n Problem with server certificate msg, err: %v", err)
-	}
-
-	pubKey, ok := cert.PublicKey.(*dsa.PublicKey)
-
-	if !ok {
-		t.Error("\n can convert pubkey to dsa pub key")
-	}
-
-	serverData.CipherDef.Dsa.PublicKey = pubKey
-
-	err = serverData.verifyServerKeyExchange(serverKeyExchange)
-
-	if err != nil {
-		t.Errorf("\n Problem with serverKeyExchange msg, err: %v", err)
-	}
-
-	err = serverData.verifyServerHelloDone(serverHelloDone)
-	if err != nil {
-		t.Errorf("\n Problem with serverKeyExchange msg, err: %v", err)
-	}
-
-	private := big.NewInt(3)
-
-	serverData.CipherDef.DhParams.Private = private
-
-	clientKeyExchangeMsg := []byte{22, 3, 0, 0, 7, 16, 0, 0, 3, 0, 1, 2}
-	serverData.computeKeys([]byte{0, 1, 2})
-	clientChangeCipher := []byte{20, 3, 0, 0, 1, 1}
-
-	conn.Write(clientKeyExchangeMsg)
-	conn.Write(clientChangeCipher)
-
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, clientKeyExchangeMsg[5:])
-
-	finishedMsg, err := serverData.generateClientFinishedMsg()
-	if err != nil {
-		t.Error(err)
-	}
-	_, err = conn.Write(finishedMsg)
-	if err != nil {
-		t.Errorf("Problem writing client finished messgae :%v", err)
-	}
-
-	data, err = serverData.readNMessage(2, conn)
-	if err != nil {
-		t.Errorf("Problem reading server chage cipher and server finished msgs, err: %v", err)
-	}
-
-	serverChangeCipher := data[0]
-	serverFinished := data[1]
-
-	err = serverData.verifyServerChangeCipher(serverChangeCipher)
-
-	if err != nil {
-		t.Errorf("Problem with verify server change cipher msg:%v", err)
-	}
-
-	err = serverData.verifyServerFinished(serverFinished)
-
-	if err != nil {
-		t.Errorf("Problem with verify server finished %v", err)
-	}
-
-}
-
 func runOpensslCommand(args []string) error {
 	cmdArgs := []string{"s_client"}
 	cmdArgs = append(cmdArgs, "-connect")
@@ -1282,6 +740,7 @@ func runOpensslCommand(args []string) error {
 	cmd.Dir = getOpenSslDir()
 
 	output, err := cmd.CombinedOutput()
+
 	if err != nil {
 		return fmt.Errorf("Error running openssl command: %v\n, output: %s \n", err, output)
 	}
@@ -1298,9 +757,7 @@ func runOpensslCommand(args []string) error {
 }
 
 func TestHandshakeOpenS3_ADH_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert(false)
-
-	server := startServer(params, SSL30Version)
+	server := startServer(nil, SSL30Version)
 
 	defer StopServer(*server)
 
@@ -1309,9 +766,7 @@ func TestHandshakeOpenS3_ADH_DES_CBC3_SHA(t *testing.T) {
 	}
 }
 func TestHandshakeOpenS3_ADH_DES_CBC_SHA(t *testing.T) {
-	params := generateRsaCert(false)
-
-	server := startServer(params, SSL30Version)
+	server := startServer(nil, SSL30Version)
 
 	defer StopServer(*server)
 
@@ -1470,9 +925,7 @@ func TestHandshakeOpenS3_EXP_RC4_MD5(t *testing.T) {
 }
 
 func TestHandshakeOpenS3_ADH_RC4_MD5(t *testing.T) {
-	params := generateRsaCert(true)
-
-	server := startServer(params, SSL30Version)
+	server := startServer(nil, SSL30Version)
 	defer StopServer(*server)
 
 	if err := runOpensslCommand([]string{"-cipher", "ADH-RC4-MD5", "-ssl3", "-reconnect"}); err != nil {
@@ -1482,9 +935,7 @@ func TestHandshakeOpenS3_ADH_RC4_MD5(t *testing.T) {
 }
 
 func TestHandshakeOpenS3_EXP_ADH_RC4_MD5(t *testing.T) {
-	params := generateRsaCert(true)
-
-	server := startServer(params, SSL30Version)
+	server := startServer(nil, SSL30Version)
 	defer StopServer(*server)
 
 	if err := runOpensslCommand([]string{"-cipher", "EXP-ADH-RC4-MD5", "-ssl3", "-reconnect"}); err != nil {

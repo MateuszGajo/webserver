@@ -815,8 +815,12 @@ var masterKeyGenLabel = map[uint16][]byte{
 }
 
 func (serverData *ServerData) handleHandshakeClientKeyExchange(contentData []byte) error {
+	conentLength := uint32(contentData[1])<<16 | uint32(contentData[2])<<8 | uint32(contentData[3])
+	if len(contentData)-4 != int(conentLength) {
+		return fmt.Errorf("invalid content length, expected: %v, got: %v", conentLength, len(contentData)-4)
+	}
 
-	preMasterSecret, err := serverData.CipherDef.ComputerMasterSecret(contentData[4:])
+	preMasterSecret, err := serverData.CipherDef.ComputeMasterSecret(contentData[4:])
 
 	if err != nil {
 		return err
@@ -827,13 +831,12 @@ func (serverData *ServerData) handleHandshakeClientKeyExchange(contentData []byt
 	masterKeySeed = append(masterKeySeed, serverData.ServerRandom...)
 
 	label := masterKeyGenLabel[binary.BigEndian.Uint16(serverData.Version)]
-	fmt.Println("master key")
 	masterKey := serverData.prf(preMasterSecret, masterKeySeed, label, MASTER_SECRET_LENGTH)
 
 	err = serverData.calculateKeyBlock(masterKey)
 
 	if err != nil {
-		return fmt.Errorf("Problem while calculating key block: %v", err)
+		return fmt.Errorf("problem while calculating key block: %v", err)
 	}
 
 	serverData.MasterKey = masterKey

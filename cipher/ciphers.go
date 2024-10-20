@@ -107,8 +107,9 @@ type RC2Cipherr struct {
 }
 
 type RsaCipher struct {
-	PrivateKey *rsa.PrivateKey
-	PublicKey  *rsa.PublicKey
+	PrivateKey   *rsa.PrivateKey
+	PublicKey    *rsa.PublicKey
+	LengthRecord bool
 }
 type DsaCipher struct {
 	PrivateKey *dsa.PrivateKey
@@ -256,12 +257,10 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) ([]
 		return []byte{}, fmt.Errorf("encryption algorithm: %v not implemented", cipherDef.Spec.EncryptionAlgorithm)
 	}
 
-	// cipherDef.Keys.IVServer = encryptedMsg[len(encryptedMsg)-8:]
-
 	return encryptedMsg, err
 }
 
-func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) ([]byte, error) {
+func (cipherDef *CipherDef) ComputeMasterSecret(data []byte) ([]byte, error) {
 	var preMasterSecret []byte
 	switch cipherDef.Spec.KeyExchange {
 	case KeyExchangeMethodDH:
@@ -271,6 +270,14 @@ func (cipherDef *CipherDef) ComputerMasterSecret(data []byte) ([]byte, error) {
 		cipherDef.DhParams.ClientPublic = clinetPublicKeyInt
 		preMasterSecret = cipherDef.DhParams.ComputePreMasterSecret().Bytes()
 	case KeyExchangeMethodRSA:
+		// Starting from tls 1.0 there is additional length before rsa signed data
+		if cipherDef.Rsa.LengthRecord {
+			keyLength := binary.BigEndian.Uint16(data[:2])
+			if int(keyLength) != len(data)-2 {
+				return nil, fmt.Errorf("invalid content length, expected: %v, got: %v", int(keyLength), len(data)-2)
+			}
+			data = data[2:]
+		}
 		decrypted, err := rsa.DecryptPKCS1v15(rand.Reader, cipherDef.Rsa.PrivateKey, data)
 		if err != nil {
 			return nil, fmt.Errorf("couldnt decrypt rsa, err: %v", err)
@@ -293,7 +300,7 @@ func (cipherDef *CipherDef) GenerateServerKeyExchange() ([]byte, error) {
 
 	switch cipherDef.Spec.KeyExchange {
 	case KeyExchangeMethodDH:
-		return cipherDef.DhParams.GenerateDhParams()
+		return cipherDef.DhParams.GenerateDhParams(cipherDef.Spec.IsExportable, cipherDef.Spec.KeyExchangeRotation)
 	case KeyExchangeMethodRSA:
 		return []byte{}, nil
 	default:

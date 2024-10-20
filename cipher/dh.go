@@ -1,8 +1,10 @@
 package cipher
 
 import (
-	"errors"
+	"crypto/rand"
+	"crypto/rsa"
 	"fmt"
+	"handshakeServer/helpers"
 	"math/big"
 )
 
@@ -48,12 +50,23 @@ import (
 // 	};
 // } ServerKeyExchange;
 
+// Ideally for static dh this should be store on the disk, but just for sake of implementing it, lets story it in ram
+type DhComponent struct {
+	prime   *big.Int
+	g       *big.Int
+	private *big.Int
+	public  *big.Int
+}
+
+var staticDh *DhComponent
+var staticDhWeak *DhComponent
+
 func generatePrivateKey(p *big.Int) (*big.Int, error) {
-	// privateKey, ok := rand.Int(rand.Reader, p)
-	privateKey, ok := new(big.Int).SetString("3", 16)
-	if !ok {
-		return nil, errors.New("")
+	privateKey, err := rand.Int(rand.Reader, p)
+	if err != nil {
+		return nil, fmt.Errorf("problem generating private key: %v", err)
 	}
+	privateKey.Add(privateKey, big.NewInt(1))
 	return privateKey, nil
 }
 
@@ -63,12 +76,18 @@ func computePublicKey(g, privateKey, p *big.Int) *big.Int {
 	return publicKey
 }
 
-func (dh *DhParams) GenerateDhParams() ([]byte, error) {
+func generateDhComponents(weakKey bool) (*DhComponent, error) {
+	keyLength := 2048
 
-	pPrime, ok := new(big.Int).SetString("3", 16)
-	if !ok {
-		return nil, fmt.Errorf("error converting string to big int")
+	if weakKey {
+		keyLength = 512
 	}
+	p, err := rsa.GenerateKey(rand.Reader, keyLength)
+	if err != nil {
+		return nil, fmt.Errorf("problem generating p: %v", err)
+	}
+	pPrime := p.Primes[0]
+
 	gGenerator := big.NewInt(2)
 	serverPrivateVal, err := generatePrivateKey(pPrime)
 	if err != nil {
@@ -76,25 +95,65 @@ func (dh *DhParams) GenerateDhParams() ([]byte, error) {
 	}
 	serverPublicKey := computePublicKey(gGenerator, serverPrivateVal, pPrime)
 
-	dh.P = pPrime
-	dh.Q = gGenerator
-	dh.Private = serverPrivateVal
+	return &DhComponent{
+		prime:   pPrime,
+		g:       gGenerator,
+		private: serverPrivateVal,
+		public:  serverPublicKey,
+	}, nil
 
-	prime := pPrime.Bytes()         // p a large prime nmber
-	generator := gGenerator.Bytes() // g a base used for generic public values
+}
+
+func (dh *DhParams) GenerateDhParams(weakKey bool, ephemeral bool) ([]byte, error) {
+	//Ephemeral Diffie-Hellman (DHE in the context of TLS) differs from the static Diffie-Hellman (DH) in the way that static Diffie-Hellman key exchanges always use the same Diffie-Hellman private keys. So, each time the same parties do a DH key exchange, they end up with the same shared secret.
+	// https://mbed-tls.readthedocs.io/en/latest/kb/cryptography/ephemeral-diffie-hellman/
+	var dhComponent *DhComponent
+	var err error
+
+	if weakKey {
+		if staticDhWeak != nil && !ephemeral {
+			dhComponent = staticDhWeak
+		} else {
+			dhComponent, err = generateDhComponents(true)
+			staticDhWeak = dhComponent
+		}
+	} else {
+		if staticDh != nil && !ephemeral {
+			dhComponent = staticDh
+		} else {
+			dhComponent, err = generateDhComponents(weakKey)
+			staticDh = dhComponent
+		}
+
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	dh.P = dhComponent.prime
+	dh.Q = dhComponent.g
+	dh.Private = dhComponent.private
+
+	prime := dhComponent.prime.Bytes() // p a large prime nmber
+	generator := dhComponent.g.Bytes() // g a base used for generic public values
 	// p and g are public paramters, both parties need to know these paramters to perform the key exchange
 
-	publicKey := serverPublicKey.Bytes() // Ys the server public key
+	publicKey := dhComponent.public.Bytes() // Ys the server public key
 	// the server public key is essential for the client t ocompue the shared secre, the clients needs this value to compute its own private value
 
 	// to calcualte shared secret i need to clientPublic^serverPriavte mod p (pprime)
 
+	primeLen := helpers.Int32ToBigEndian(len(prime))
+	genLen := helpers.Int32ToBigEndian(len(generator))
+	serverPubKeyLength := helpers.Int32ToBigEndian(len(publicKey))
+
 	resp := []byte{}
-	resp = append(resp, []byte{0, byte(len(prime))}...)
+	resp = append(resp, primeLen...)
 	resp = append(resp, prime...)
-	resp = append(resp, []byte{0, byte(len(generator))}...)
+	resp = append(resp, genLen...)
 	resp = append(resp, generator...)
-	resp = append(resp, []byte{0, byte(len(publicKey))}...)
+	resp = append(resp, serverPubKeyLength...)
 	resp = append(resp, publicKey...)
 
 	return resp, nil

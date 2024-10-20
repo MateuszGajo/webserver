@@ -161,7 +161,7 @@ Loop:
 			return
 		default:
 			buff := make([]byte, 1024)
-			conn.SetDeadline(time.Now().Add(200 * time.Millisecond))
+			conn.SetDeadline(time.Now().Add(650 * time.Millisecond))
 			n, err := conn.Read(buff)
 			if err != nil {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
@@ -174,9 +174,9 @@ Loop:
 			if n == 0 {
 				return
 			}
-			clientHello := buff[:n]
+			msg := buff[:n]
 
-			input := append(bufInit, clientHello...)
+			input := append(bufInit, msg...)
 			msgs, partial, err := serverData.Parser(input)
 			bufInit = partial
 

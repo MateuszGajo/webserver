@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/asn1"
+	"encoding/binary"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -151,6 +152,9 @@ func (serverData *ServerData) parseCertificate(certFile, keyFile string) ([]byte
 			serverData.CipherDef.Rsa.PrivateKey = rsaKey
 		} else {
 			return nil, fmt.Errorf("can't convert to rsa private key")
+		}
+		if binary.BigEndian.Uint16(serverData.Version) > uint16(SSL30Version) {
+			serverData.CipherDef.Rsa.LengthRecord = true
 		}
 	} else {
 		return nil, fmt.Errorf("\n unkown certificate with pub cert algorithm: %v", cert.PublicKeyAlgorithm)
