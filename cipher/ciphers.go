@@ -220,22 +220,33 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 }
 
 func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []byte) ([]byte, error) {
-	cipherDef.Keys.IVClient = encryptedData[len(encryptedData)-8:]
-
+	var decryptedData []byte
+	var err error
 	switch cipherDef.Spec.EncryptionAlgorithm {
 	case EncryptionAlgorithm3DES:
-		return Decrypt3DesMessage(encryptedData, writeKey, iv)
+		decryptedData, err = Decrypt3DesMessage(encryptedData, writeKey, iv)
 	case EncryptionAlgorithmDES:
-		return DecryptDesMessage(encryptedData, writeKey, iv)
+		decryptedData, err = DecryptDesMessage(encryptedData, writeKey, iv)
 	case EncryptionAlgorithmDES40:
-		return DecryptDesMessage(encryptedData, writeKey, iv)
+		decryptedData, err = DecryptDesMessage(encryptedData, writeKey, iv)
 	case EncryptionAlgorithmRC4:
-		return cipherDef.DecryptRC4(encryptedData, writeKey)
+		decryptedData, err = cipherDef.DecryptRC4(encryptedData, writeKey)
 	case EncryptionAlgorithmRC2:
-		return cipherDef.DecryptRC2(encryptedData, writeKey, iv)
+		decryptedData, err = cipherDef.DecryptRC2(encryptedData, writeKey, iv)
 	default:
 		return []byte{}, fmt.Errorf("encryption algorithm: %v not implemented", cipherDef.Spec.EncryptionAlgorithm)
 	}
+	if err != nil {
+		return nil, err
+	}
+
+	if cipherDef.Spec.IvSize == 0 {
+		return decryptedData, nil
+	}
+
+	cipherDef.Keys.IVClient = decryptedData[:cipherDef.Spec.IvSize]
+
+	return decryptedData[cipherDef.Spec.IvSize:], nil
 
 }
 

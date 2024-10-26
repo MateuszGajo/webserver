@@ -1,5 +1,5 @@
 package handshake
-
+//
 import (
 	"crypto/md5"
 	"crypto/rand"
@@ -124,6 +124,7 @@ type Version uint16
 const (
 	SSL30Version Version = 0x0300
 	TLS10Version Version = 0x0301
+	TLS11Version Version = 0x0302
 )
 
 type AlertDescription byte
@@ -152,6 +153,7 @@ const (
 	AlertDescriptionInternalError          AlertDescription = 80
 	AlertDescriptionUserCancceled          AlertDescription = 90
 	AlertDescriptionNoRenegotation         AlertDescription = 100
+	AlertDescriptionUnsportedExtension     AlertDescription = 110
 )
 
 const MASTER_SECRET_LENGTH = 48
@@ -287,7 +289,7 @@ func (serverData *ServerData) generateStreamCipher(dataCompressedType, sslCompre
 	switch binary.BigEndian.Uint16(serverData.Version) {
 	case 0x0300:
 		return serverData.S3generateStreamCipher(dataCompressedType, sslCompressData, seqNum, mac)
-	case 0x0301:
+	case 0x0301, 0x0302:
 		return serverData.T1GenerateStreamCipher(dataCompressedType, sslCompressData, seqNum, mac)
 	default:
 		fmt.Println("should never enter this state in generateStreamCipher")
@@ -347,12 +349,12 @@ func (serverData *ServerData) handleAlert(contentData []byte) {
 		closeConn = true
 	case AlertDescriptionUnexpectedMessage:
 		// Do Retry, bad message recive, long term problem can indicate protocol mismatch(client expecting e.g tls 1.2 and server sending 1.3), incorrect squence or error in
-		fmt.Print("Unexpected message, Retry connectin again, if problem persist, check configuration")
+		fmt.Println("Unexpected message, Retry connectin again, if problem persist, check configuration")
 
 	case AlertDescriptionBadRecordMac:
 		// A message auhentication code (MAC) check failed, check your connection, can indicate server problem or an attack
 		// Always fatal
-		fmt.Print("MAC failed, check your connection")
+		fmt.Println("MAC failed, check your connection")
 	case AlertDescriptionDecompressionFailure:
 		// The compression function recived wrong input, mostly indicated corrupted message, decompression methods such as lz77, works by sling a window over the input data to idientify repeted sequences. It replaces these sequences with references to earlier occurances of the same sequence.
 		// Lookahed bufer is a smaller buffer within the window that scans for the longer match of the current input string.
@@ -365,28 +367,28 @@ func (serverData *ServerData) handleAlert(contentData []byte) {
 		// abra		cadabra		Literal a
 		// abrac	adabra		(4, 1) (back 4, length 1)
 		// abracad	abra		(7, 4) (back 7, length 4)
-		fmt.Print("Can't decompress data, check for input corupteness")
+		fmt.Println("Can't decompress data, check for input corupteness")
 	case AlertDescriptionHandshakeFailure:
 		// Handshake process failed, ensure that server and browser supports required protocol and ciphers, may indicate problem with server configuration
 		// Always fatal
-		fmt.Print("Handshake failure, make sure choose procol and ciphers are supported by both parties")
+		fmt.Println("Handshake failure, make sure choose procol and ciphers are supported by both parties")
 
 	case AlertDescriptionBadCertificate:
 		// Bad certificate
-		fmt.Print("Make sure that provided cerificate is valid")
+		fmt.Println("Make sure that provided cerificate is valid")
 	case AlertDescriptionUnsupportedCertificate:
 		// The certificate is unsported:
 		// 1. Invalid certificate type, e.g server can only accept x5.09 certificated
 		// 2. Unrecgonized cerificate authority
 		// 3. Certificate algorithm issue, its not supported by peers
 		// 4. Certificate version its not supported
-		fmt.Print("Unsported certificated, make sure both parties support the type, issuer, version and both known authority")
+		fmt.Println("Unsported certificated, make sure both parties support the type, issuer, version and both known authority")
 	case AlertDescriptionCertificateRevoked:
 		// Cerificate was revoke
-		fmt.Print("Certificate revoked")
+		fmt.Println("Certificate revoked")
 	case AlertDescriptionCertificateExpired:
 		// Cerificated expired
-		fmt.Print("Certificate expiered")
+		fmt.Println("Certificate expiered")
 	case AlertDescriptionCertificateUnknown:
 		// 1. Unknown certificate
 		// 2. Untrusted CA
@@ -395,55 +397,58 @@ func (serverData *ServerData) handleAlert(contentData []byte) {
 		// 5. Malformed or corrupted
 		// 6. Mimstached purpose, doesnt have appropriate extention
 		// 7. Expired trust store
-		fmt.Print("Unknown certificate, check CA authority, trust store, extenstion compability or maybe its coruppted data")
+		fmt.Println("Unknown certificate, check CA authority, trust store, extenstion compability or maybe its coruppted data")
 	case AlertDescriptionIllegalParameter:
 		// Paramters not allowed or recognized:
 		// 1. Invalid cipher suite, not implmented by one of the parties
 		// 2. Not supported tls version
 		// 3. Incorrected exntesion
 		// 4. Invalid message structure
-		fmt.Print("Illegal paramters, check tls version, supported protcol, extenstion or message structure")
+		fmt.Println("Illegal paramters, check tls version, supported protcol, extenstion or message structure")
 	case AlertDescriptionDecryptionFailed:
 		// Corrupted data
 		// Invalid padding
 		// Invalid key
 		// Mac compromised
-		fmt.Print("Decryptio failed")
+		fmt.Println("Decryptio failed")
 	case AlertDescriptionRecordOverflow:
 		// Overflowed limit of 16.384 bytes
-		fmt.Print("Record overflowed")
+		fmt.Println("Record overflowed")
 	case AlertDescriptionUnknownCA:
 		// UnknownCA
-		fmt.Print("Unknown cert CA")
+		fmt.Println("Unknown cert CA")
 	case AlertDescriptionAccessDenided:
 		// Access denied, no permission
 		// Rejected client cert
-		fmt.Print("Access Denied")
+		fmt.Println("Access Denied")
 	case AlertDescriptionDecodeError:
 		// Message incorrectly formatted
 		// Corupted data
-		fmt.Print("Decode error")
+		fmt.Println("Decode error")
 	case AlertDescriptionDecryptError:
 		// 	Decryption of a message failed, often due to a key mismatch or improper encryption mechanism.
 		// The MAC (Message Authentication Code) was incorrect, meaning the integrity check failed.
-		fmt.Print("Decrypt error")
+		fmt.Println("Decrypt error")
 	case AlertDescriptionExportRestriction:
 		// Can't use exported cipher
-		fmt.Print("Export restirction")
+		fmt.Println("Export restirction")
 	case AlertDescriptionProtocolVersion:
 		// Client and server do not support common veersion
 		// Reject older version by newer clients
-		fmt.Print("Protocol version")
+		fmt.Println("Protocol version")
 	case AlertDescriptionInsufficientSecuirty:
 		// Weak cipher suite
-		fmt.Print("Infufficient security")
+		fmt.Println("Infufficient security")
 	case AlertDescriptionInternalError:
 		// Just internal error
-		fmt.Print("Internal error")
+		fmt.Println("Internal error")
 	case AlertDescriptionNoRenegotation:
 		// 	One of the parties requested to renegotiate the TLS session, but the other party refused.
 		// Some servers or clients may disable renegotiation for security reasons
-		fmt.Print("No renegotation")
+		fmt.Println("No renegotation")
+	case AlertDescriptionUnsportedExtension:
+		// Extenstion not supported
+		fmt.Println("Unsported extension")
 	default:
 		fmt.Printf("Unregonized alert occured: %v", alertDescription)
 	}
@@ -509,8 +514,26 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 	if serverData.IsServerEncrypted {
 
 		mac := serverData.generateStreamCipher([]byte{byte(contentData)}, data, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
-
-		dataWithMac := []byte{}
+		// Iv is a pseudo-random function used along with key to add randomness to encryption proces. The IV ensure if the same plaintext is encrypted multiple time with the same key, the result is different
+		// Why iv is inside message?
+		// Iv used to be taken from last msg, attacker that has access to plaintext of message can send request and with a use of reverse engineering deduce content of the message.
+		// For example, Alice's ciphertext-block-1 (aC1) is result of Alice's PlainText-block-1 (aP1) being XORed with the iv generate for the encryptioin
+		// ac1=e(ao1 xor aiv)
+		// If the eavesdropper (Eve) can predict the IV to be used for her encryption (eIV) then she can choose plaintext such the Eve's Plaintext-Block-1(eP1)
+		// eP1=aIv xor eIV xor PG1
+		// Wher PG1 is Plaintext-guess-Block-1 which is what Eve is guessing for the value of aP1. This allows a dirt trick to be played in the calculation of Eve's ciphertext-block01(ec1)
+		// ec1 = e(ep1 xor eiv)
+		// ec1 = e(aiv xor eiv xor pg1 xor eiv)
+		// ec1 - e(aiv xor pg1)
+		// Therefore if Eve's plainText-Guess block-1 is a match for Alice plaintext-block1 then ec1=Ac1
+		// Now you might be thinking that for AES which has a 128-bit block size that Eve will still have her work cut out for herself as there is a huge range of possibilities for plaintext values. You would be right as a guess has a 1 in 2^128 (3.40282366921e38) chance of being right; however, that can be wittled down further as language is not random, not all bytes map to printable characters, context matters, and the protocol might have additional features that can be leveraged.
+		// source: https://derekwill.com/2021/01/01/aes-cbc-mode-chosen-plaintext-attack/
+		Iv := make([]byte, serverData.CipherDef.Spec.IvSize)
+		_, err := rand.Read(Iv)
+		if err != nil {
+			return fmt.Errorf("can't generate iv, err: %v", err)
+		}
+		dataWithMac := Iv
 		dataWithMac = append(dataWithMac, data...)
 		dataWithMac = append(dataWithMac, mac...)
 
@@ -555,7 +578,6 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 
 		if err = serverData.serverHello(); err != nil {
 			return fmt.Errorf("\n problem with serverHello msg : %v", err)
-
 		}
 
 		if serverData.reuseSession {
@@ -672,11 +694,18 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 		return fmt.Errorf("conent length does not fit data passed, expected to have length of: %v, got: %v", dataContentExpectedLen, len(contentData))
 	}
 
-	clientVersion := contentData[4:6] // backward compability, used to dicated which version to use, now we have version in protocol header.
-
-	if !reflect.DeepEqual(clientVersion, serverData.Version) {
+	// FROM TLS 1.2 spec
+	// Earlier versions of the TLS specification were not fully clear on
+	// what the record layer version number (TLSPlaintext.version) should
+	// contain when sending ClientHello (i.e., before it is known which
+	// version of the protocol will be employed).  Thus, TLS servers
+	// compliant with this specification MUST accept any value {03,XX} as
+	// the record layer version number for ClientHello.
+	clientVersion := binary.BigEndian.Uint16(contentData[4:6])
+	// TODO TLS 1.1 maybe write better algo to chose version
+	if clientVersion < 0x0300 || clientVersion > binary.BigEndian.Uint16(serverData.Version) {
 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
-		return fmt.Errorf("ssl version not matches, expected: %v, got: %v", serverData.Version, clientVersion)
+		return fmt.Errorf("ssl version not matches, expected to be: %v or lower, got: %v", binary.BigEndian.Uint16(serverData.Version), clientVersion)
 	}
 	radnomBytesTime := int64(binary.BigEndian.Uint32(contentData[6:10]))
 	currentTime := time.Now().UnixMilli()
@@ -694,15 +723,19 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 	sessionIndexEnd := uint16(39 + sessionLength)
 	session := contentData[39:sessionIndexEnd]
 
+	fmt.Println("cipher suites")
+	fmt.Println(contentData[sessionIndexEnd : sessionIndexEnd+2])
+
 	cipherSuitesLength := binary.BigEndian.Uint16(contentData[sessionIndexEnd : sessionIndexEnd+2])
 
 	cipherSuites := contentData[sessionIndexEnd+2 : sessionIndexEnd+2+cipherSuitesLength]
 	compressionsLength := contentData[sessionIndexEnd+2+cipherSuitesLength]
-	compressionMethodList := contentData[sessionIndexEnd+2+cipherSuitesLength+1:]
+	compressionMethodListEndIndex := sessionIndexEnd + 2 + cipherSuitesLength + 1 + uint16(compressionsLength)
+	compressionMethodList := contentData[sessionIndexEnd+2+cipherSuitesLength+1 : compressionMethodListEndIndex]
 
 	if len(compressionMethodList) != int(compressionsLength) {
 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
-		return fmt.Errorf("\n got length:%v, expected :%v", len(compressionMethodList), int(compressionsLength))
+		return fmt.Errorf("\n compression method list wrong length got:%v, expected :%v", len(compressionMethodList), int(compressionsLength))
 	}
 
 	serverData.loadSession(string(session))
@@ -718,9 +751,53 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 	if serverData.CipherDef.Spec.SignatureAlgorithm != cipher.SignatureAlgorithmAnonymous && serverData.cert == nil {
 		return fmt.Errorf("please provider certificate for: %v", serverData.CipherDef.Spec.SignatureAlgorithm)
 	}
-	err = serverData.CipherDef.SelectCompressionMethod(compressionMethodList)
+	if err = serverData.CipherDef.SelectCompressionMethod(compressionMethodList); err != nil {
+		return err
+	}
 
-	serverData.SelectBlockCipherPadding()
+	err = serverData.SelectBlockCipherPadding()
+
+	// if compressionMethodListEndIndex == uint16(len(contentData)) {
+	// No extenstion
+	return err
+	// }
+
+	// TODO implement this
+	if compressionMethodListEndIndex+4 > uint16(len(contentData)) {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionUnsportedExtension)
+		return fmt.Errorf("invalid extenstion length, expect to get at least four bytes of extension length, extenstion we got: %v", contentData[compressionMethodListEndIndex:])
+	}
+
+	extension := contentData[compressionMethodListEndIndex:]
+
+	extensionLength := binary.BigEndian.Uint16(extension[:2])
+	// That is length for all extenstion, we need to do loop here
+	if extensionLength != uint16(len(extension)) {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionUnsportedExtension)
+		return fmt.Errorf("invalid extension length, expected: %v got: %v", extensionLength, len(extension))
+	}
+	extenionType := binary.BigEndian.Uint16(extension[2:4])
+
+	switch extenionType {
+	case 35:
+		if len(extension) < 6 {
+			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionUnsportedExtension)
+			return fmt.Errorf("invalid extenstion length, expect to get at least six bytes of extension length, extenstion we got: %v", contentData[compressionMethodListEndIndex:])
+		}
+		// contentLength := binary.BigEndian.Uint16(extension[4:6])
+		// content := extension[6 : 6+contentLength]
+
+	default:
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionUnsportedExtension)
+		return fmt.Errorf("unsupported extenstion type: %v", extenionType)
+	}
+
+	// the rest bytes are extenstion
+
+	// if sessionIndexEnd+2+cipherSuitesLength+1+uint16(compressionsLength) != uint16(len(contentData)) {
+	// 	serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+	// 	return fmt.Errorf("\n Some bytes are lft:%v, expected :%v", len(compressionMethodList), int(compressionsLength))
+	// }
 
 	return err
 }
@@ -858,8 +935,9 @@ func (serverData *ServerData) serverHelloDone() error {
 }
 
 var masterKeyGenLabel = map[uint16][]byte{
-	0x0300: []byte{},
+	0x0300: nil,
 	0x0301: []byte("master secret"),
+	0x0302: []byte("master secret"),
 }
 
 func (serverData *ServerData) handleHandshakeClientKeyExchange(contentData []byte) error {
@@ -879,6 +957,9 @@ func (serverData *ServerData) handleHandshakeClientKeyExchange(contentData []byt
 	masterKeySeed = append(masterKeySeed, serverData.ServerRandom...)
 
 	label := masterKeyGenLabel[binary.BigEndian.Uint16(serverData.Version)]
+	if label == nil && binary.BigEndian.Uint16(serverData.Version) >= 0x301 {
+		return fmt.Errorf("every version from tls1.0 should use label for calculate master key")
+	}
 	masterKey := serverData.prf(preMasterSecret, masterKeySeed, label, MASTER_SECRET_LENGTH)
 
 	err = serverData.calculateKeyBlock(masterKey)
@@ -917,7 +998,7 @@ func (serverData *ServerData) calculateExportableFinalWriteKey(clientKey, server
 		result = append(result, serverWriteKey)
 		return result
 	}
-	fmt.Println("should never enter this state in prf")
+	fmt.Println("should never enter this state in export final write key")
 	os.Exit(1)
 	return [][]byte{}
 
@@ -948,7 +1029,7 @@ func (serverData *ServerData) calculateExportableFinalIv(seed, serverSeed []byte
 		result = append(result, iv[serverData.CipherDef.Spec.IvSize:])
 		return result
 	}
-	fmt.Println("should never enter this state in prf")
+	fmt.Println("should never enter this state in export final iv")
 	os.Exit(1)
 	return [][]byte{}
 
@@ -964,8 +1045,9 @@ func (serverData *ServerData) s3CalculateExportableFinalIv(seed []byte, length i
 }
 
 var keyBlockLabel = map[uint16][]byte{
-	0x0300: []byte{},
+	0x0300: nil,
 	0x0301: []byte("key expansion"),
+	0x0302: []byte("key expansion"),
 }
 
 func (serverData *ServerData) prf(key, seed, label []byte, length int) []byte {
@@ -975,6 +1057,7 @@ func (serverData *ServerData) prf(key, seed, label []byte, length int) []byte {
 	case 0x0300:
 		return s3_prf(key, seedExtended, length)
 	case 0x0301:
+	case 0x0302:
 		return T1Prf(key, seedExtended, length)
 	default:
 		fmt.Println("should never enter this state in prf")
@@ -987,10 +1070,10 @@ func (serverData *ServerData) SelectBlockCipherPadding() error {
 	switch binary.BigEndian.Uint16(serverData.Version) {
 	case 0x0300:
 		serverData.CipherDef.Spec.PaddingType = cipher.ZerosPaddingType
-	case 0x0301:
+	case 0x0301, 0x0302:
 		serverData.CipherDef.Spec.PaddingType = cipher.LengthPaddingType
 	default:
-		return fmt.Errorf("unsporrted version")
+		return fmt.Errorf("unsporrted version  in selct cipher padding")
 	}
 	return nil
 
@@ -1003,6 +1086,9 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) error {
 
 	keyBlockLen := serverData.CipherDef.Spec.HashSize*2 + serverData.CipherDef.Spec.KeyMaterial*2 + serverData.CipherDef.Spec.IvSize*2
 	label := keyBlockLabel[binary.BigEndian.Uint16(serverData.Version)]
+	if label == nil && binary.BigEndian.Uint16(serverData.Version) >= 0x301 {
+		return fmt.Errorf("every version from tls1.0 should use label for calculate key block")
+	}
 	keyBlock := serverData.prf(masterKey, keyBlockSeed, label, keyBlockLen)
 
 	macEndIndex := serverData.CipherDef.Spec.HashSize * 2
@@ -1106,7 +1192,7 @@ func (serverData *ServerData) generateFinishedHandshakeMac(label []byte, handsha
 		md5Hash := serverData.S3GenerateFinishedHandshakeMac(md5.New(), label, handshakeMessages) // -1 without last message witch is client verify
 		shaHash := serverData.S3GenerateFinishedHandshakeMac(sha1.New(), label, handshakeMessages)
 		return append(md5Hash, shaHash...)
-	case 0x0301:
+	case 0x0301, 0x0302:
 		return serverData.T1GenerateFinishedHandshakeMac(label, handshakeMessages)
 	default:
 		fmt.Println("should never enter this state in generateFinishedHandshakeMac")
@@ -1124,11 +1210,19 @@ var finishedLabel = map[uint16]map[string][]byte{
 		"client": []byte("client finished"),
 		"server": []byte("server finished"),
 	},
+	0x0302: {
+		"client": []byte("client finished"),
+		"server": []byte("server finished"),
+	},
 }
 
 func (serverData *ServerData) handleHandshakeClientFinished(contentData []byte) error {
 
 	label := finishedLabel[uint16(binary.BigEndian.Uint16(serverData.Version))]["client"]
+
+	if label == nil {
+		return fmt.Errorf("there is no label for client finished msg")
+	}
 
 	clientHash := serverData.generateFinishedHandshakeMac(label, serverData.HandshakeMessages[:len(serverData.HandshakeMessages)-1])
 
