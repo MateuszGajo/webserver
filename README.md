@@ -25,9 +25,28 @@ Project supports following ciphers of ssl 3.0 (based on rfc 6101):
 Other ciphers can work but hasn't been tested yet.
 
 *All fortezza ciphers are not implemented in ssl 3.0.
-
 ## Supported ciphers tls 1.0
 Project supports following ciphers of tls1.0 (based on rfc 2246):
+* ADH-DES-CBC3-SHA
+* ADH-DES-CBC-SHA
+* ADH-RC4-MD5
+* EXP-ADH-RC4-MD5
+* DES-CBC3-SHA
+* DES-CBC-SHA
+* EDH-RSA-DES-CBC-SHA
+* EXP-EDH-RSA-DES-CBC-SHA
+* EXP-DES-CBC-SHA (Uses weak key)
+* EXP-ADH-DES-CBC-SHA
+* RC4-SHA
+* EXP-RC4-MD5  (Uses weak key)
+* EXP-RC2-CBC-MD5 (Uses weak key)
+* EDH-DSS-DES-CBC3-SHA
+* EDH-DSS-DES-CBC-SHA
+* EXP-EDH-DSS-DES-CBC-SHA
+* EDH-RSA-DES-CBC3-SHA
+
+## Supported ciphers tls 1.1
+Project supports following ciphers of tls1.1:
 * ADH-DES-CBC3-SHA
 * ADH-DES-CBC-SHA
 * ADH-RC4-MD5
