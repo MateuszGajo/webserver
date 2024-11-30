@@ -21,8 +21,8 @@ func (serverData *ServerData) Parser(clientHello []byte) (output [][]byte, rest 
 
 		version := binary.BigEndian.Uint16(clientHello[1:3])
 		// lets assume we only support ssl 3.0
-		if version != binary.BigEndian.Uint16(serverData.Version) {
-			return output, rest, fmt.Errorf("wrong version, expected:%v, got:%v", binary.BigEndian.Uint16(serverData.Version), version)
+		if version < 0x0300 || version > binary.BigEndian.Uint16(serverData.Version) {
+			return output, rest, fmt.Errorf("wrong version to be :%v or lower, got:%v", binary.BigEndian.Uint16(serverData.Version), version)
 		}
 		length := binary.BigEndian.Uint16(clientHello[3:5])
 
