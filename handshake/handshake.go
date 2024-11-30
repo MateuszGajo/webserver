@@ -528,13 +528,16 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 		// Therefore if Eve's plainText-Guess block-1 is a match for Alice plaintext-block1 then ec1=Ac1
 		// Now you might be thinking that for AES which has a 128-bit block size that Eve will still have her work cut out for herself as there is a huge range of possibilities for plaintext values. You would be right as a guess has a 1 in 2^128 (3.40282366921e38) chance of being right; however, that can be wittled down further as language is not random, not all bytes map to printable characters, context matters, and the protocol might have additional features that can be leveraged.
 		// source: https://derekwill.com/2021/01/01/aes-cbc-mode-chosen-plaintext-attack/
+		dataWithMac := []byte{}
+		if(binary.BigEndian.Uint16(serverData.Version) >= uint16(TLS11Version)) {
 		Iv := make([]byte, serverData.CipherDef.Spec.IvSize)
 		_, err := rand.Read(Iv)
 		if err != nil {
 			return fmt.Errorf("can't generate iv, err: %v", err)
 		}
-		dataWithMac := Iv
-		dataWithMac = append(dataWithMac, data...)
+		dataWithMac = Iv
+		}
+				dataWithMac = append(dataWithMac, data...)
 		dataWithMac = append(dataWithMac, mac...)
 
 		encryptedMsg, err := serverData.CipherDef.EncryptMessage(dataWithMac, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
@@ -723,9 +726,6 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 	sessionIndexEnd := uint16(39 + sessionLength)
 	session := contentData[39:sessionIndexEnd]
 
-	fmt.Println("cipher suites")
-	fmt.Println(contentData[sessionIndexEnd : sessionIndexEnd+2])
-
 	cipherSuitesLength := binary.BigEndian.Uint16(contentData[sessionIndexEnd : sessionIndexEnd+2])
 
 	cipherSuites := contentData[sessionIndexEnd+2 : sessionIndexEnd+2+cipherSuitesLength]
@@ -747,6 +747,9 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 		return fmt.Errorf("problem selecting cipher suite, err: %v", err)
 	}
 	serverData.CipherDef.GetCipherSpecInfo()
+	if(binary.BigEndian.Uint16(serverData.Version) >= uint16(TLS11Version)) {
+		serverData.CipherDef.Spec.IvAsPayload = true
+	}
 
 	if serverData.CipherDef.Spec.SignatureAlgorithm != cipher.SignatureAlgorithmAnonymous && serverData.cert == nil {
 		return fmt.Errorf("please provider certificate for: %v", serverData.CipherDef.Spec.SignatureAlgorithm)
@@ -1056,8 +1059,7 @@ func (serverData *ServerData) prf(key, seed, label []byte, length int) []byte {
 	switch binary.BigEndian.Uint16(serverData.Version) {
 	case 0x0300:
 		return s3_prf(key, seedExtended, length)
-	case 0x0301:
-	case 0x0302:
+	case 0x0301, 0x0302:
 		return T1Prf(key, seedExtended, length)
 	default:
 		fmt.Println("should never enter this state in prf")
@@ -1095,7 +1097,7 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) error {
 	writeKeyEndIndex := macEndIndex + serverData.CipherDef.Spec.KeyMaterial*2
 
 	if len(keyBlock) < writeKeyEndIndex+serverData.CipherDef.Spec.IvSize*2 {
-		return fmt.Errorf("key block should be of at lest length: %v", writeKeyEndIndex+serverData.CipherDef.Spec.IvSize*2)
+		return fmt.Errorf("key block should be of at lest length: %v, instead we got: %v", writeKeyEndIndex+serverData.CipherDef.Spec.IvSize*2, len(keyBlock))
 	}
 
 	cipherDefKeys := cipher.CipherKeys{
