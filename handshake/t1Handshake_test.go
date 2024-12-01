@@ -1,6 +1,9 @@
 package handshake
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestHandshakeOpenT1_ADH_DES_CBC3_SHA(t *testing.T) {
 	server := startServer(nil, TLS10Version)
@@ -167,6 +170,8 @@ func TestHandshakeOpenT1_EDH_DSS_DES_CBC_SHA(t *testing.T) {
 	params := generateDSsCert()
 
 	server := startServer(params, TLS10Version)
+	fmt.Println("hello??")
+	fmt.Println(OpenSSLVersion)
 	defer StopServer(*server)
 
 	if err := runOpensslCommand([]string{"-cipher", "EDH-DSS-DES-CBC-SHA", "-tls1", "-reconnect"}); err != nil {

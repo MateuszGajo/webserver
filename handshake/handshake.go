@@ -125,6 +125,7 @@ const (
 	SSL30Version Version = 0x0300
 	TLS10Version Version = 0x0301
 	TLS11Version Version = 0x0302
+	TLS12Version Version = 0x0303
 )
 
 type AlertDescription byte
@@ -289,7 +290,7 @@ func (serverData *ServerData) generateStreamCipher(dataCompressedType, sslCompre
 	switch binary.BigEndian.Uint16(serverData.Version) {
 	case 0x0300:
 		return serverData.S3generateStreamCipher(dataCompressedType, sslCompressData, seqNum, mac)
-	case 0x0301, 0x0302:
+	case 0x0301, 0x0302,0x303:
 		return serverData.T1GenerateStreamCipher(dataCompressedType, sslCompressData, seqNum, mac)
 	default:
 		fmt.Println("should never enter this state in generateStreamCipher")
@@ -941,6 +942,7 @@ var masterKeyGenLabel = map[uint16][]byte{
 	0x0300: nil,
 	0x0301: []byte("master secret"),
 	0x0302: []byte("master secret"),
+	0x0303: []byte("master secret"),
 }
 
 func (serverData *ServerData) handleHandshakeClientKeyExchange(contentData []byte) error {
@@ -994,7 +996,7 @@ func (serverData *ServerData) calculateExportableFinalWriteKey(clientKey, server
 		result = append(result, clientWriteKey)
 		result = append(result, serverWriteKey)
 		return result
-	case 0x0301:
+	case 0x0301,0x0302, 0x0303:
 		clientWriteKey := serverData.prf(clientKey, seed, []byte("client write key"), length)
 		serverWriteKey := serverData.prf(serverKey, seed, []byte("server write key"), length)
 		result = append(result, clientWriteKey)
@@ -1026,7 +1028,7 @@ func (serverData *ServerData) calculateExportableFinalIv(seed, serverSeed []byte
 		result = append(result, ivClient)
 		result = append(result, ivServer)
 		return result
-	case 0x0301:
+	case 0x0301,0x0302,0x0303:
 		iv := serverData.prf([]byte{}, seed, []byte("IV block"), 2*serverData.CipherDef.Spec.IvSize)
 		result = append(result, iv[:serverData.CipherDef.Spec.IvSize])
 		result = append(result, iv[serverData.CipherDef.Spec.IvSize:])
@@ -1051,6 +1053,7 @@ var keyBlockLabel = map[uint16][]byte{
 	0x0300: nil,
 	0x0301: []byte("key expansion"),
 	0x0302: []byte("key expansion"),
+	0x0303: []byte("key expansion"),
 }
 
 func (serverData *ServerData) prf(key, seed, label []byte, length int) []byte {
@@ -1061,6 +1064,9 @@ func (serverData *ServerData) prf(key, seed, label []byte, length int) []byte {
 		return s3_prf(key, seedExtended, length)
 	case 0x0301, 0x0302:
 		return T1Prf(key, seedExtended, length)
+	case 0x0303:
+		fmt.Println("make sure we're using right prf function, t12")
+		return T12Prf(key, seedExtended, length)
 	default:
 		fmt.Println("should never enter this state in prf")
 		os.Exit(1)
@@ -1072,7 +1078,7 @@ func (serverData *ServerData) SelectBlockCipherPadding() error {
 	switch binary.BigEndian.Uint16(serverData.Version) {
 	case 0x0300:
 		serverData.CipherDef.Spec.PaddingType = cipher.ZerosPaddingType
-	case 0x0301, 0x0302:
+	case 0x0301, 0x0302,0x0303:
 		serverData.CipherDef.Spec.PaddingType = cipher.LengthPaddingType
 	default:
 		return fmt.Errorf("unsporrted version  in selct cipher padding")
@@ -1092,6 +1098,8 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) error {
 		return fmt.Errorf("every version from tls1.0 should use label for calculate key block")
 	}
 	keyBlock := serverData.prf(masterKey, keyBlockSeed, label, keyBlockLen)
+	fmt.Println("master key")
+	fmt.Println(masterKey)
 
 	macEndIndex := serverData.CipherDef.Spec.HashSize * 2
 	writeKeyEndIndex := macEndIndex + serverData.CipherDef.Spec.KeyMaterial*2
@@ -1108,7 +1116,8 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) error {
 		IVClient:       keyBlock[writeKeyEndIndex : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize],
 		IVServer:       keyBlock[writeKeyEndIndex+serverData.CipherDef.Spec.IvSize : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize*2],
 	}
-
+	fmt.Println("Key block")
+	fmt.Printf("\n%+v", cipherDefKeys)
 	if serverData.CipherDef.Spec.IsExportable {
 		clientSeed := []byte{}
 		clientSeed = append(clientSeed, serverData.ClientRandom...)
@@ -1196,6 +1205,8 @@ func (serverData *ServerData) generateFinishedHandshakeMac(label []byte, handsha
 		return append(md5Hash, shaHash...)
 	case 0x0301, 0x0302:
 		return serverData.T1GenerateFinishedHandshakeMac(label, handshakeMessages)
+	case 0x0303:
+		return serverData.T12GenerateFinishedHandshakeMac(label,handshakeMessages)
 	default:
 		fmt.Println("should never enter this state in generateFinishedHandshakeMac")
 		os.Exit(1)
@@ -1216,6 +1227,11 @@ var finishedLabel = map[uint16]map[string][]byte{
 		"client": []byte("client finished"),
 		"server": []byte("server finished"),
 	},
+	0x0303: {
+		"client": []byte("client finished"),
+		"server": []byte("server finished"),
+	},
+
 }
 
 func (serverData *ServerData) handleHandshakeClientFinished(contentData []byte) error {

@@ -690,6 +690,11 @@ func (serverData *ServerData) verifyCertificate(data []byte) (*x509.Certificate,
 }
 
 func startServer(cert *HttpServerCertParam, version Version) *HttpServer {
+	if version == TLS11Version || version == TLS12Version {
+		OpenSSLVersion = "openssl-1.0.2u"
+	} else if version == TLS10Version || version == SSL30Version {
+		OpenSSLVersion = "openssl-0.9.7e"
+	}
 	versionByte := make([]byte, 2)
 	binary.BigEndian.PutUint16(versionByte, uint16(version))
 
