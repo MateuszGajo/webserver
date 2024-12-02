@@ -67,6 +67,7 @@ func Decrypt3DesMessage(encryptedData, writeKey, iv []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("problem decrypting data: %v", err)
 	}
+	fmt.Println("decoded msg", decodedMsg)
 
 	decodedMsgWithoutPadding, err := removeCustomPadding(decodedMsg, len(encryptedData))
 	if err != nil {

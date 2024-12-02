@@ -115,6 +115,8 @@ func (serverData *ServerData) T12GenerateStreamCipher(dataCompressedType, sslCom
 		hashFunc = hmac.New(md5.New, mac)
 	case cipher.HashAlgorithmSHA:
 		hashFunc = hmac.New(sha1.New, mac)
+	case cipher.HashAlgorithmSHA256:
+		hashFunc = hmac.New(sha256.New, mac)
 	default:
 		panic("wrong algorithm used can't use: " + serverData.CipherDef.Spec.HashAlgorithm)
 	}

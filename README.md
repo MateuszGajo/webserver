@@ -41,28 +41,26 @@ Project supports following ciphers of tls1.0 (based on rfc 2246):
 * EXP-RC4-MD5  (Uses weak key)
 * EXP-RC2-CBC-MD5 (Uses weak key)
 * EDH-DSS-DES-CBC3-SHA
-* EDH-DSS-DES-CBC-SHA
 * EXP-EDH-DSS-DES-CBC-SHA
 * EDH-RSA-DES-CBC3-SHA
 
 ## Supported ciphers tls 1.1
 Project supports following ciphers of tls1.1:
 * ADH-DES-CBC3-SHA
-* ADH-DES-CBC-SHA
 * ADH-RC4-MD5
-* EXP-ADH-RC4-MD5
 * DES-CBC3-SHA
-* DES-CBC-SHA
-* EDH-RSA-DES-CBC-SHA
-* EXP-EDH-RSA-DES-CBC-SHA
-* EXP-DES-CBC-SHA (Uses weak key)
-* EXP-ADH-DES-CBC-SHA
 * RC4-SHA
-* EXP-RC4-MD5  (Uses weak key)
-* EXP-RC2-CBC-MD5 (Uses weak key)
 * EDH-DSS-DES-CBC3-SHA
-* EDH-DSS-DES-CBC-SHA
-* EXP-EDH-DSS-DES-CBC-SHA
+* EDH-RSA-DES-CBC3-SHA
+
+## Supported ciphers tls 1.2
+Project supports following ciphers of tls1.1:
+* ADH-DES-CBC3-SHA
+* ADH-RC4-MD5
+* ADH-AES-SHA
+* DES-CBC3-SHA
+* RC4-SHA
+* EDH-DSS-DES-CBC3-SHA
 * EDH-RSA-DES-CBC3-SHA
 
 ## Supported features

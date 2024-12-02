@@ -1,20 +1,23 @@
 package handshake
+
 //
 import (
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"handshakeServer/cipher"
-	"handshakeServer/helpers"
 	"hash"
 	"net"
 	"os"
 	"reflect"
 	"sync"
 	"time"
+
+	"handshakeServer/cipher"
+	"handshakeServer/helpers"
 )
 
 // SSL 3.0
@@ -305,7 +308,9 @@ func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) ([
 	case cipher.HashAlgorithmMD5:
 		macSize = md5.New().Size()
 	case cipher.HashAlgorithmSHA:
-		macSize = sha1.New().Size()
+		macSize = sha1.New().Size()	
+	case cipher.HashAlgorithmSHA256:
+		macSize = sha256.New().Size()
 	default:
 		panic("wrong algorithm used can't use: " + serverData.CipherDef.Spec.HashAlgorithm)
 	}
