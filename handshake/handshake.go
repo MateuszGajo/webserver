@@ -293,8 +293,10 @@ func (serverData *ServerData) generateStreamCipher(dataCompressedType, sslCompre
 	switch binary.BigEndian.Uint16(serverData.Version) {
 	case 0x0300:
 		return serverData.S3generateStreamCipher(dataCompressedType, sslCompressData, seqNum, mac)
-	case 0x0301, 0x0302,0x303:
+	case 0x0301, 0x0302:
 		return serverData.T1GenerateStreamCipher(dataCompressedType, sslCompressData, seqNum, mac)
+	case 0x0303:
+		return serverData.T12GenerateStreamCipher(dataCompressedType, sslCompressData, seqNum, mac)
 	default:
 		fmt.Println("should never enter this state in generateStreamCipher")
 		os.Exit(1)
@@ -308,7 +310,7 @@ func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) ([
 	case cipher.HashAlgorithmMD5:
 		macSize = md5.New().Size()
 	case cipher.HashAlgorithmSHA:
-		macSize = sha1.New().Size()	
+		macSize = sha1.New().Size()
 	case cipher.HashAlgorithmSHA256:
 		macSize = sha256.New().Size()
 	default:
@@ -535,15 +537,15 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 		// Now you might be thinking that for AES which has a 128-bit block size that Eve will still have her work cut out for herself as there is a huge range of possibilities for plaintext values. You would be right as a guess has a 1 in 2^128 (3.40282366921e38) chance of being right; however, that can be wittled down further as language is not random, not all bytes map to printable characters, context matters, and the protocol might have additional features that can be leveraged.
 		// source: https://derekwill.com/2021/01/01/aes-cbc-mode-chosen-plaintext-attack/
 		dataWithMac := []byte{}
-		if(binary.BigEndian.Uint16(serverData.Version) >= uint16(TLS11Version)) {
-		Iv := make([]byte, serverData.CipherDef.Spec.IvSize)
-		_, err := rand.Read(Iv)
-		if err != nil {
-			return fmt.Errorf("can't generate iv, err: %v", err)
+		if binary.BigEndian.Uint16(serverData.Version) >= uint16(TLS11Version) {
+			Iv := make([]byte, serverData.CipherDef.Spec.IvSize)
+			_, err := rand.Read(Iv)
+			if err != nil {
+				return fmt.Errorf("can't generate iv, err: %v", err)
+			}
+			dataWithMac = Iv
 		}
-		dataWithMac = Iv
-		}
-				dataWithMac = append(dataWithMac, data...)
+		dataWithMac = append(dataWithMac, data...)
 		dataWithMac = append(dataWithMac, mac...)
 
 		encryptedMsg, err := serverData.CipherDef.EncryptMessage(dataWithMac, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
@@ -609,6 +611,8 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 			if err = serverData.loadCertificate(); err != nil {
 				return fmt.Errorf("\n problem loading certificate: %V", err)
 			}
+			fmt.Println("`````")
+			fmt.Println("send cert")
 		}
 
 		// The server key exchange message is sent by the server if it has no cetificate, has a certificate used for siging (e.g. dss certificate, signing-only rsa)
@@ -622,6 +626,8 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 				return fmt.Errorf("\n problem with serverkeyexchange message: %v", err)
 
 			}
+			fmt.Println("`````")
+			fmt.Println("key exchange")
 		}
 
 		if err = serverData.serverHelloDone(); err != nil {
@@ -753,7 +759,7 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 		return fmt.Errorf("problem selecting cipher suite, err: %v", err)
 	}
 	serverData.CipherDef.GetCipherSpecInfo()
-	if(binary.BigEndian.Uint16(serverData.Version) >= uint16(TLS11Version)) {
+	if binary.BigEndian.Uint16(serverData.Version) >= uint16(TLS11Version) {
 		serverData.CipherDef.Spec.IvAsPayload = true
 	}
 
@@ -821,46 +827,24 @@ func signatureHash(algorithm hash.Hash, clientRandom, serverRandom, serverParams
 
 }
 
+func (serverData *ServerData) getServerKeyExchange() ([]byte, error) {
+	switch binary.BigEndian.Uint16(serverData.Version) {
+	case 0x0300, 0x0301, 0x0302:
+		return serverData.S3GetServerKeyExchangeMessage()
+	case 0x0303:
+		return serverData.T12GetServerKeyExchangeMessage()
+	default:
+		panic("should never enter this state, in getServerKeyExchange")
+	}
+}
+
 func (serverData *ServerData) serverKeyExchange() error {
 
-	keyExchangeParams, err := serverData.CipherDef.GenerateServerKeyExchange()
-	if err != nil {
-		return err
-	}
-	hash := []byte{}
-
-	switch serverData.CipherDef.Spec.SignatureAlgorithm {
-	case cipher.SignatureAlgorithmAnonymous:
-	case cipher.SignatureAlgorithmRSA:
-		md5Hash := signatureHash(md5.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
-		shaHash := signatureHash(sha1.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
-		hash = append(hash, md5Hash...)
-		hash = append(hash, shaHash...)
-
-	case cipher.SignatureAlgorithmDSA:
-
-		shaHash := signatureHash(sha1.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
-		hash = append(hash, shaHash...)
-	default:
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
-		return fmt.Errorf("unsupported Algorithm: %v", serverData.CipherDef.Spec.SignatureAlgorithm)
-	}
-
-	signedParams, err := serverData.CipherDef.SignData(hash)
-	signatureLength := helpers.Int32ToBigEndian(len(signedParams))
+	keyExchangeData, err := serverData.getServerKeyExchange()
 
 	if err != nil {
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
-		return fmt.Errorf("problem with singin data, err: %v", err)
+		return fmt.Errorf("Problem while generating key exchange msg: %v", err)
 	}
-
-	keyExchangeData := []byte{}
-	keyExchangeData = append(keyExchangeData, keyExchangeParams...)
-	if len(signedParams) > 0 {
-		keyExchangeData = append(keyExchangeData, signatureLength...)
-		keyExchangeData = append(keyExchangeData, signedParams...)
-	}
-
 	handshakeLengthh := len(keyExchangeData)
 	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(handshakeLengthh)
 	if err != nil {
@@ -871,6 +855,9 @@ func (serverData *ServerData) serverKeyExchange() error {
 	serverKeyExchange := []byte{byte(HandshakeMessageServerKeyExchange)}
 	serverKeyExchange = append(serverKeyExchange, handshakeLengthByte...)
 	serverKeyExchange = append(serverKeyExchange, keyExchangeData...)
+
+	fmt.Println("key exchange msg")
+	fmt.Println(serverKeyExchange)
 
 	err = serverData.BuffSendData(ContentTypeHandshake, serverKeyExchange)
 
@@ -1001,7 +988,7 @@ func (serverData *ServerData) calculateExportableFinalWriteKey(clientKey, server
 		result = append(result, clientWriteKey)
 		result = append(result, serverWriteKey)
 		return result
-	case 0x0301,0x0302, 0x0303:
+	case 0x0301, 0x0302, 0x0303:
 		clientWriteKey := serverData.prf(clientKey, seed, []byte("client write key"), length)
 		serverWriteKey := serverData.prf(serverKey, seed, []byte("server write key"), length)
 		result = append(result, clientWriteKey)
@@ -1033,7 +1020,7 @@ func (serverData *ServerData) calculateExportableFinalIv(seed, serverSeed []byte
 		result = append(result, ivClient)
 		result = append(result, ivServer)
 		return result
-	case 0x0301,0x0302,0x0303:
+	case 0x0301, 0x0302, 0x0303:
 		iv := serverData.prf([]byte{}, seed, []byte("IV block"), 2*serverData.CipherDef.Spec.IvSize)
 		result = append(result, iv[:serverData.CipherDef.Spec.IvSize])
 		result = append(result, iv[serverData.CipherDef.Spec.IvSize:])
@@ -1083,7 +1070,7 @@ func (serverData *ServerData) SelectBlockCipherPadding() error {
 	switch binary.BigEndian.Uint16(serverData.Version) {
 	case 0x0300:
 		serverData.CipherDef.Spec.PaddingType = cipher.ZerosPaddingType
-	case 0x0301, 0x0302,0x0303:
+	case 0x0301, 0x0302, 0x0303:
 		serverData.CipherDef.Spec.PaddingType = cipher.LengthPaddingType
 	default:
 		return fmt.Errorf("unsporrted version  in selct cipher padding")
@@ -1211,7 +1198,7 @@ func (serverData *ServerData) generateFinishedHandshakeMac(label []byte, handsha
 	case 0x0301, 0x0302:
 		return serverData.T1GenerateFinishedHandshakeMac(label, handshakeMessages)
 	case 0x0303:
-		return serverData.T12GenerateFinishedHandshakeMac(label,handshakeMessages)
+		return serverData.T12GenerateFinishedHandshakeMac(label, handshakeMessages)
 	default:
 		fmt.Println("should never enter this state in generateFinishedHandshakeMac")
 		os.Exit(1)
@@ -1236,7 +1223,6 @@ var finishedLabel = map[uint16]map[string][]byte{
 		"client": []byte("client finished"),
 		"server": []byte("server finished"),
 	},
-
 }
 
 func (serverData *ServerData) handleHandshakeClientFinished(contentData []byte) error {

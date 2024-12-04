@@ -58,6 +58,7 @@ Project supports following ciphers of tls1.1:
 * ADH-DES-CBC3-SHA
 * ADH-RC4-MD5
 * ADH-AES-SHA
+* ADH-AES-SHA256
 * DES-CBC3-SHA
 * RC4-SHA
 * EDH-DSS-DES-CBC3-SHA
@@ -85,6 +86,7 @@ Project has been verified with openssl 0.9.7e.
 
 # How to run test
 1. Download openssl version supporting ssl 3.0, tls 1.0 (recommended openssl 0.9.7e)
+
 2. Extract data in openssl folder
 3. Make variable "OpenSSLVersion" in handshake_test.go if needed
 4. run `go test ./...`

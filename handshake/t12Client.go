@@ -5,11 +5,70 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
+	"fmt"
 	"hash"
 
 	"handshakeServer/cipher"
 	"handshakeServer/helpers"
 )
+
+func (serverData *ServerData) T12GetServerKeyExchangeMessage() ([]byte, error) {
+
+	keyExchangeParams, err := serverData.CipherDef.GenerateServerKeyExchange()
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println("key exchange params")
+	fmt.Println(keyExchangeParams)
+	hash := []byte{}
+	// TODO: change this function
+	switch serverData.CipherDef.Spec.SignatureAlgorithm {
+	case cipher.SignatureAlgorithmAnonymous:
+	case cipher.SignatureAlgorithmRSA:
+		var hashAlgorithm = sha1.New()
+		switch serverData.CipherDef.Spec.HashAlgorithm {
+		case cipher.HashAlgorithmSHA256:
+			hashAlgorithm = sha256.New()
+		}
+		hash = signatureHash(hashAlgorithm, serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
+		// hash = append(hash, md5Hash...)
+		// hash = append(hash, shaHash...)
+		fmt.Println("key exchange params rsa")
+	//hash = append(hash, serverData.ClientRandom...)
+	//	hash = append(hash, serverData.ServerRandom...)
+	//	hash = append(hash, keyExchangeParams...)
+
+	case cipher.SignatureAlgorithmDSA:
+
+		shaHash := signatureHash(sha1.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
+		hash = append(hash, shaHash...)
+	default:
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+		return nil, fmt.Errorf("unsupported Algorithm: %v", serverData.CipherDef.Spec.SignatureAlgorithm)
+	}
+
+	signedParams, err := serverData.CipherDef.SignData(hash)
+	signatureLength := helpers.Int32ToBigEndian(len(signedParams))
+
+	if err != nil {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
+		return nil, fmt.Errorf("problem with singin data, err: %v", err)
+	}
+
+	keyExchangeData := []byte{}
+	keyExchangeData = append(keyExchangeData, keyExchangeParams...)
+	// SignatureAndHashAlgorithm, what the fuck, we have signature and hash algorithm, not not really specified, actually there is describe in 4.7.  Cryptographic Attributes :))))
+
+	if len(signedParams) > 0 {
+		keyExchangeData = append(keyExchangeData, byte(serverData.CipherDef.Spec.HashAlgorithmIdentifier))
+		keyExchangeData = append(keyExchangeData, byte(serverData.CipherDef.Spec.SignatureAlgorithmIdentifier))
+
+		keyExchangeData = append(keyExchangeData, signatureLength...)
+		keyExchangeData = append(keyExchangeData, signedParams...)
+	}
+
+	return keyExchangeData, nil
+}
 
 func (serverData *ServerData) T12GenerateFinishedHandshakeMac(label []byte, handshakeMessages [][]byte) []byte {
 	// TODO: tls 1.0 implement this
@@ -23,20 +82,20 @@ func (serverData *ServerData) T12GenerateFinishedHandshakeMac(label []byte, hand
 	// representation has the same encoding as with previous versions.
 	// Future cipher suites MAY specify other lengths but such length
 	// MUST be at least 12 bytes.
-	defaultVerifyDataLength :=12
+	defaultVerifyDataLength := 12
 	allHandskaedMessageCombined := []byte{}
 
 	for _, v := range handshakeMessages {
 		allHandskaedMessageCombined = append(allHandskaedMessageCombined, v...)
 	}
-      	// RFC 5246
+	// RFC 5246
 	//Hash denotes a Hash of the handshake messages.  For the PRF
-      	//defined in Section 5, the Hash MUST be the Hash used as the basis
-      	//for the PRF.  Any cipher suite which defines a different PRF MUST
-      	//also define the Hash to use in the Finished computation.
-      	//   -  The MD5/SHA-1 combination in the pseudorandom function (PRF) has
-      	//been replaced with cipher-suite-specified PRFs.  All cipher suites
-      	//in this document use P_SHA256.
+	//defined in Section 5, the Hash MUST be the Hash used as the basis
+	//for the PRF.  Any cipher suite which defines a different PRF MUST
+	//also define the Hash to use in the Finished computation.
+	//   -  The MD5/SHA-1 combination in the pseudorandom function (PRF) has
+	//been replaced with cipher-suite-specified PRFs.  All cipher suites
+	//in this document use P_SHA256.
 
 	// TODO: Verify it but it looks like i can hardcode sha256 for tls 1.2? Maybe if cipher uses >sha256 i need to use it stronger algorithm
 
@@ -90,7 +149,6 @@ func T12PHash(hash func() hash.Hash, secret, seed []byte, length int) []byte {
 }
 
 func T12Prf(secret, seed []byte, req_len int) []byte {
-
 
 	return T12PHash(sha256.New, secret, seed, req_len)[:req_len]
 

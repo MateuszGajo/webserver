@@ -939,6 +939,7 @@ func TestHandshakeOpenS3_ADH_RC4_MD5(t *testing.T) {
 
 }
 
+// TODO fix EXP TEST
 func TestHandshakeOpenS3_EXP_ADH_RC4_MD5(t *testing.T) {
 	server := startServer(nil, SSL30Version)
 	defer StopServer(*server)

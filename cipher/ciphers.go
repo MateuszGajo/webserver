@@ -31,9 +31,9 @@ type CipherKeys struct {
 type HashAlgorithm string
 
 const (
-	HashAlgorithmSHA HashAlgorithm = "SHA"
+	HashAlgorithmSHA    HashAlgorithm = "SHA"
 	HashAlgorithmSHA256 HashAlgorithm = "SHA256"
-	HashAlgorithmMD5 HashAlgorithm = "MD5"
+	HashAlgorithmMD5    HashAlgorithm = "MD5"
 )
 
 type KeyExchangeMethod string
@@ -63,6 +63,27 @@ const (
 	SignatureAlgorithmAnonymous SignatureAlgorithm = "signatureAnonymous"
 )
 
+type HashAlgorithmIdentifier byte
+
+const (
+	HashAlgorithmNumberNone   HashAlgorithmIdentifier = 0
+	HashAlgorithmNumberMd5    HashAlgorithmIdentifier = 1
+	HashAlgorithmNumberSha1   HashAlgorithmIdentifier = 2
+	HashAlgorithmNumberSha224 HashAlgorithmIdentifier = 3
+	HashAlgorithmNumberSha256 HashAlgorithmIdentifier = 4
+	HashAlgorithmNumberSha384 HashAlgorithmIdentifier = 5
+	HashAlgorithmNumberSha512 HashAlgorithmIdentifier = 6
+)
+
+type SignatureAlgorithmIdentifier byte
+
+const (
+	SignatureAlgorithmNumberAnonymous SignatureAlgorithmIdentifier = 0
+	SignatureAlgorithmNumberRsa       SignatureAlgorithmIdentifier = 1
+	SignatureAlgorithmNumberDsa       SignatureAlgorithmIdentifier = 2
+	SignatureAlgorithmNumberECDSA     SignatureAlgorithmIdentifier = 3
+)
+
 type PaddingType string
 
 const (
@@ -71,20 +92,22 @@ const (
 )
 
 type CipherSpec struct {
-	HashSize          int
-	KeyMaterial       int
-	ExportKeyMaterial int
-	IvSize            int
-	IvAsPayload	  bool
-	HashAlgorithm     HashAlgorithm
-	KeyExchange       KeyExchangeMethod
+	HashSize                int
+	KeyMaterial             int
+	ExportKeyMaterial       int
+	IvSize                  int
+	IvAsPayload             bool
+	HashAlgorithm           HashAlgorithm
+	HashAlgorithmIdentifier HashAlgorithmIdentifier
+	KeyExchange             KeyExchangeMethod
 	// Use this paramter when using DHE key exchange, as dh has almost the same implementation to dhe
-	KeyExchangeRotation bool
-	EncryptionAlgorithm EncryptionAlgorithm
-	SignatureAlgorithm  SignatureAlgorithm
-	CompressionMethod   CompressionMethod
-	IsExportable        bool
-	PaddingType         PaddingType
+	KeyExchangeRotation          bool
+	EncryptionAlgorithm          EncryptionAlgorithm
+	SignatureAlgorithm           SignatureAlgorithm
+	SignatureAlgorithmIdentifier SignatureAlgorithmIdentifier
+	CompressionMethod            CompressionMethod
+	IsExportable                 bool
+	PaddingType                  PaddingType
 }
 
 type CipherDef struct {
@@ -162,16 +185,17 @@ const (
 	CIPHER_SUITE_SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA TLSCipherSuite = 0x0014
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SHA          TLSCipherSuite = 0x0015
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA     TLSCipherSuite = 0x0016
+	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_128_CBC_SHA256   TLSCipherSuite = 0x0067
 	// Folowing cipher suited are used for server-authenticated (optianlly client) diffie-hellman. Dh denotes cipher suited in which the server-s certificate contains dh paramters signed by the  certificate authority.
 	// dhe denothes ephemral diffie-hellman where dh paramters are signed by dss or rsa cerificate, which has been signed by ca. The sigin algorithm used in specified after the dh or dhepparamter.
 	// In all case  the clie must have the same type of cerificate, and must use the dh paramters chosen by the server
 
-	CIPHER_SUITE_SSL_DH_anon_WITH_RC4_128_MD5          TLSCipherSuite = 0x0018
-	CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA     TLSCipherSuite = 0x001B
-	CIPHER_SUITE_SSL_DH_anon_WITH_AES_128_CBC_SHA 	   TLSCipherSuite = 0x0034
-	CIPHER_SUITE_SSL_DH_anon_WITH_AES_256_CBC_SHA 	   TLSCipherSuite = 0x003A
-	CIPHER_SUITE_SSL_DH_anon_WITH_AES_128_CBC_SHA256   TLSCipherSuite = 0x006C
-	CIPHER_SUITE_SSL_DH_anon_WITH_AES_256_CBC_SHA256   TLSCipherSuite = 0x006D
+	CIPHER_SUITE_SSL_DH_anon_WITH_RC4_128_MD5        TLSCipherSuite = 0x0018
+	CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA   TLSCipherSuite = 0x001B
+	CIPHER_SUITE_SSL_DH_anon_WITH_AES_128_CBC_SHA    TLSCipherSuite = 0x0034
+	CIPHER_SUITE_SSL_DH_anon_WITH_AES_256_CBC_SHA    TLSCipherSuite = 0x003A
+	CIPHER_SUITE_SSL_DH_anon_WITH_AES_128_CBC_SHA256 TLSCipherSuite = 0x006C
+	CIPHER_SUITE_SSL_DH_anon_WITH_AES_256_CBC_SHA256 TLSCipherSuite = 0x006D
 	// The following cipher suited are used for completely anonymous diffie hellman in which neither party is authenticated. Note thi is extremly vuluberable to man in the middle attackers, so its strongly discouraged to use it.
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_NULL_SHA         TLSCipherSuite = 0x001C
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA TLSCipherSuite = 0x001D
@@ -208,12 +232,16 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 	CIPHER_SUITE_SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA: "DHE_RSA_EXPORT_DES40_CBC_SHA",
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SHA:          "DHE_RSA_WITH_DES_CBC_SHA",
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:     "DHE_RSA_WITH_3DES_EDE-CBC_SHA",
+	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_128_CBC_SHA256:   "DHE_RSA_WITH_AES_128-CBC_SHA256",
 	// Folowing cipher suited are used for server-authenticated (optianlly client) diffie-hellman. Dh denotes cipher suited in which the server-s certificate contains dh paramters signed by the  certificate authority.
 	// dhe denothes ephemral diffie-hellman where dh paramters are signed by dss or rsa cerificate, which has been signed by ca. The sigin algorithm used in specified after the dh or dhepparamter.
 	// In all case  the clie must have the same type of cerificate, and must use the dh paramters chosen by the server
-	CIPHER_SUITE_SSL_DH_anon_WITH_RC4_128_MD5:          "DH_anon_WITH_RC4_128_MD5",
-	CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:     "DH_anon_WITH_3DES_EDE-CBC_SHA",
-	CIPHER_SUITE_SSL_DH_anon_WITH_AES_128_CBC_SHA:      "DH_anon_WITH_AES_128-CBC_SHA",
+	CIPHER_SUITE_SSL_DH_anon_WITH_RC4_128_MD5:        "DH_anon_WITH_RC4_128_MD5",
+	CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:   "DH_anon_WITH_3DES_EDE-CBC_SHA",
+	CIPHER_SUITE_SSL_DH_anon_WITH_AES_128_CBC_SHA:    "DH_anon_WITH_AES_128-CBC_SHA",
+	CIPHER_SUITE_SSL_DH_anon_WITH_AES_128_CBC_SHA256: "DH_anon_WITH_AES_128-CBC_SHA256",
+	CIPHER_SUITE_SSL_DH_anon_WITH_AES_256_CBC_SHA:    "DH_anon_WITH_AES_256-CBC_SHA",
+	CIPHER_SUITE_SSL_DH_anon_WITH_AES_256_CBC_SHA256: "DH_anon_WITH_AES_256-CBC_SHA256",
 	// The following cipher suited are used for completely anonymous diffie hellman in which neither party is authenticated. Note thi is extremly vuluberable to man in the middle attackers, so its strongly discouraged to use it.
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_NULL_SHA:         "FORTEZZA_FORTEZZA_KEA_WITH_NULL_SHA",
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA: "FORTEZZA_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA",
@@ -221,9 +249,9 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 }
 
 func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []byte) ([]byte, error) {
-	if(!cipherDef.Spec.IvAsPayload){
+	if !cipherDef.Spec.IvAsPayload {
 		fmt.Println("data as not paylod NOT NOT")
-	cipherDef.Keys.IVClient = encryptedData[len(encryptedData)-8:]
+		cipherDef.Keys.IVClient = encryptedData[len(encryptedData)-8:]
 	}
 
 	var decryptedData []byte
@@ -250,19 +278,18 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []
 	if err != nil {
 		return nil, err
 	}
-	if(cipherDef.Spec.IvAsPayload) {
-	fmt.Println("Datas payload AS AS AS ")
+	if cipherDef.Spec.IvAsPayload {
+		fmt.Println("Datas payload AS AS AS ")
 		if cipherDef.Spec.IvSize == 0 {
 			return decryptedData, nil
 		}
-		if(len(decryptedData) < cipherDef.Spec.IvSize) {
-			panic("decrypt data cant be shorter than iv size");
+		if len(decryptedData) < cipherDef.Spec.IvSize {
+			panic("decrypt data cant be shorter than iv size")
 		}
 
 		cipherDef.Keys.IVClient = decryptedData[:cipherDef.Spec.IvSize]
 
-
-	return decryptedData[cipherDef.Spec.IvSize:], nil
+		return decryptedData[cipherDef.Spec.IvSize:], nil
 	}
 	return decryptedData, nil
 }
@@ -347,7 +374,14 @@ func (cipherDef *CipherDef) SignData(hash []byte) ([]byte, error) {
 		if cipherDef.Rsa.PrivateKey == nil {
 			return nil, fmt.Errorf("\n Cant find rsa private key")
 		}
-		signature, err := rsa.SignPKCS1v15(rand.Reader, cipherDef.Rsa.PrivateKey, crypto.Hash(0), hash)
+		fmt.Println("sing rsa")
+		fmt.Println(hash)
+		cryptoHash := crypto.Hash(0)
+		switch cipherDef.Spec.HashAlgorithm {
+		case HashAlgorithmSHA256:
+			cryptoHash = crypto.SHA256
+		}
+		signature, err := rsa.SignPKCS1v15(rand.Reader, cipherDef.Rsa.PrivateKey, cryptoHash, hash)
 
 		if err != nil {
 			return nil, fmt.Errorf("\n problem ecnrypting data, err: %v", err)
@@ -446,6 +480,7 @@ func (cipherDef *CipherDef) VerifySignedData(hash, signature []byte) error {
 var serverCipherPreferences = []TLSCipherSuite{
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA,
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_RC4_128_SHA,
+	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_128_CBC_SHA256,
 	CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA,
 	CIPHER_SUITE_SSL_DH_DSS_WITH_3DES_EDE_CBC_SHA,
 	CIPHER_SUITE_SSL_DH_RSA_WITH_3DES_EDE_CBC_SHA,
@@ -573,7 +608,6 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 	encryptionAlgorithmWithParams = append(encryptionAlgorithmWithParams, encryptionAlgorithmParams...)
 	hashingMethod := cipherSuitParts[5]
 
-
 	exportable := exportMode == "EXPORT"
 
 	switch keyExchange {
@@ -592,10 +626,13 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 	switch singinAlgorithm {
 	case "DSS":
 		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmDSA
+		cipherDef.Spec.SignatureAlgorithmIdentifier = SignatureAlgorithmNumberDsa
 	case "RSA":
 		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA
+		cipherDef.Spec.SignatureAlgorithmIdentifier = SignatureAlgorithmNumberRsa
 	case "anon":
 		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmAnonymous
+		cipherDef.Spec.SignatureAlgorithmIdentifier = SignatureAlgorithmNumberAnonymous
 	default:
 		fmt.Printf("\n singinAlgorithm not implemented: %v", singinAlgorithm)
 		os.Exit(1)
@@ -604,11 +641,6 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 	if exportable {
 		cipherDef.Spec.IsExportable = true
 	}
-
-	fmt.Println("algorithm")
-	fmt.Println(encryptionAlgorithm)
-	fmt.Println(encryptionAlgorithmParams)
-	fmt.Println(encryptionAlgorithmWithParams)
 
 	switch encryptionAlgorithm {
 	case "3DES":
@@ -652,6 +684,8 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 		case "40":
 			cipherDef.Spec.KeyMaterial = 5
 			cipherDef.Spec.ExportKeyMaterial = 16
+		case "256":
+			//backward compability
 		default:
 			fmt.Printf("\n encryption param not implemented %v", param)
 			os.Exit(1)
@@ -659,7 +693,7 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 	}
 
 	// TODO: even though above one is working i think rewrite is needed, there is no assurances that i will cover all cases, new implementations follow rfc docs representation
-	
+
 	//                         Key      IV   Block
 	// Cipher        Type    Material  Size  Size
 	// ------------  ------  --------  ----  -----
@@ -668,20 +702,30 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 	// 3DES_EDE_CBC  Block      24       8      8
 	// AES_128_CBC   Block      16      16     16
 	// AES_256_CBC   Block      32      16     16
-	fmt.Println( strings.Join( encryptionAlgorithmWithParams, "_")) 
-	switch   strings.Join( encryptionAlgorithmWithParams, "_") {
-		case "AES_128_CBC":
-			cipherDef.Spec.IvSize = 16
-			cipherDef.Spec.KeyMaterial = 16 
-			cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmAES
+	fmt.Println(strings.Join(encryptionAlgorithmWithParams, "_"))
+	switch strings.Join(encryptionAlgorithmWithParams, "_") {
+	case "AES_128_CBC":
+		cipherDef.Spec.IvSize = 16
+		cipherDef.Spec.KeyMaterial = 16
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmAES
+	case "AES_256_CBC":
+		cipherDef.Spec.IvSize = 16
+		cipherDef.Spec.KeyMaterial = 32
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmAES
 	}
 	switch hashingMethod {
 	case "SHA":
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
 		cipherDef.Spec.HashSize = 20
+		cipherDef.Spec.HashAlgorithmIdentifier = HashAlgorithmNumberSha1
 	case "MD5":
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmMD5
+		cipherDef.Spec.HashAlgorithmIdentifier = HashAlgorithmNumberMd5
 		cipherDef.Spec.HashSize = 16
+	case "SHA256":
+		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA256
+		cipherDef.Spec.HashSize = 32
+		cipherDef.Spec.HashAlgorithmIdentifier = HashAlgorithmNumberSha256
 	default:
 		fmt.Printf("\n hashing method not implemented: %v", hashingMethod)
 		os.Exit(1)

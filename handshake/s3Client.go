@@ -3,10 +3,60 @@ package handshake
 import (
 	"crypto/md5"
 	"crypto/sha1"
+	"fmt"
+	"hash"
+
 	"handshakeServer/cipher"
 	"handshakeServer/helpers"
-	"hash"
 )
+
+func (serverData *ServerData) S3GetServerKeyExchangeMessage() ([]byte, error) {
+
+	keyExchangeParams, err := serverData.CipherDef.GenerateServerKeyExchange()
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println("key exchange params")
+	fmt.Println(keyExchangeParams)
+	hash := []byte{}
+	switch serverData.CipherDef.Spec.SignatureAlgorithm {
+	case cipher.SignatureAlgorithmAnonymous:
+	case cipher.SignatureAlgorithmRSA:
+		md5Hash := signatureHash(md5.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
+		shaHash := signatureHash(sha1.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
+		hash = append(hash, md5Hash...)
+		hash = append(hash, shaHash...)
+		fmt.Println("key exchange params rsa")
+
+	case cipher.SignatureAlgorithmDSA:
+
+		shaHash := signatureHash(sha1.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
+		hash = append(hash, shaHash...)
+	default:
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+		return nil, fmt.Errorf("unsupported Algorithm: %v", serverData.CipherDef.Spec.SignatureAlgorithm)
+	}
+
+	signedParams, err := serverData.CipherDef.SignData(hash)
+	signatureLength := helpers.Int32ToBigEndian(len(signedParams))
+
+	if err != nil {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
+		return nil, fmt.Errorf("problem with singin data, err: %v", err)
+	}
+
+	keyExchangeData := []byte{}
+	keyExchangeData = append(keyExchangeData, keyExchangeParams...)
+	// SignatureAndHashAlgorithm, what the fuck, we have signature and hash algorithm, not not really specified, actually there is describe in 4.7.  Cryptographic Attributes :))))
+
+	if len(signedParams) > 0 {
+
+		keyExchangeData = append(keyExchangeData, signatureLength...)
+		keyExchangeData = append(keyExchangeData, signedParams...)
+	}
+
+	return keyExchangeData, nil
+}
 
 func (serverData *ServerData) S3GenerateFinishedHandshakeMac(hashingAlgorithm hash.Hash, sender []byte, handshakeMessages [][]byte) []byte {
 	n := hashingAlgorithm.Size()
