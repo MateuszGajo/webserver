@@ -101,12 +101,6 @@ func generateDhComponents(weakKey bool) (*DhComponent, error) {
 		private: serverPrivateVal,
 		public:  serverPublicKey,
 	}, nil
-	// return &DhComponent{
-	// 	prime:   big.NewInt(7),
-	// 	g:       big.NewInt(3),
-	// 	private: big.NewInt(2),
-	// 	public:  big.NewInt(2),
-	// }, nil
 }
 
 func (dh *DhParams) GenerateDhParams(weakKey bool, ephemeral bool) ([]byte, error) {

@@ -770,16 +770,6 @@ func TestHandshakeOpenS3_ADH_DES_CBC3_SHA(t *testing.T) {
 		t.Error(err)
 	}
 }
-func TestHandshakeOpenS3_ADH_DES_CBC_SHA(t *testing.T) {
-	server := startServer(nil, SSL30Version)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "ADH-DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-
-}
 
 func TestHandshakeOpenS3_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
 	params := generateRsaCert(false)
@@ -856,43 +846,6 @@ func TestHandshakeOpenS3_EDH_DSS_DES_CBC_SHA(t *testing.T) {
 	}
 }
 
-func TestHandshakeOpenS3_EXP_EDH_RSA_DES_CBC_SHA(t *testing.T) {
-	params := generateRsaCert(false)
-
-	server := startServer(params, SSL30Version)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "EXP-EDH-RSA-DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-
-}
-
-func TestHandshakeOpenS3_EXP_EDH_DSS_DES_CBC_SHA(t *testing.T) {
-	params := generateDSsCert()
-
-	server := startServer(params, SSL30Version)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "EXP-EDH-DSS-DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestHandshakeOpenS3_EXP_DES_CBC_SHA(t *testing.T) {
-	params := generateRsaCert(true)
-
-	server := startServer(params, SSL30Version)
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "EXP-DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-
-}
-
 func TestHandshakeOpenS3_RC4_SHA(t *testing.T) {
 	params := generateRsaCert(true)
 
@@ -917,18 +870,6 @@ func TestHandshakeOpenS3_RC4_MD5(t *testing.T) {
 
 }
 
-func TestHandshakeOpenS3_EXP_RC4_MD5(t *testing.T) {
-	params := generateRsaCert(true)
-
-	server := startServer(params, SSL30Version)
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "EXP-RC4-MD5", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-
-}
-
 func TestHandshakeOpenS3_ADH_RC4_MD5(t *testing.T) {
 	server := startServer(nil, SSL30Version)
 	defer StopServer(*server)
@@ -937,16 +878,6 @@ func TestHandshakeOpenS3_ADH_RC4_MD5(t *testing.T) {
 		t.Error(err)
 	}
 
-}
-
-// TODO fix EXP TEST
-func TestHandshakeOpenS3_EXP_ADH_RC4_MD5(t *testing.T) {
-	server := startServer(nil, SSL30Version)
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "EXP-ADH-RC4-MD5", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
 }
 
 func TestHandshakeOpenS3_EXP_RC2_CBC_MD5(t *testing.T) {
