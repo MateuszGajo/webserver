@@ -621,13 +621,13 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 		// 	(serverData.CipherDef.Spec.SignatureAlgorithm == cipher.SignatureAlgorithmRSA && // signin only
 		// 		(serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH))
 		// I think can simply if to just if the key exchange method is DH
-		if serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH {
+		// only for EDH ECDH
+		if (serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH && serverData.CipherDef.Spec.KeyExchangeRotation) ||
+			(serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH && serverData.CipherDef.Spec.SignatureAlgorithm == cipher.SignatureAlgorithmAnonymous) {
 			if err = serverData.serverKeyExchange(); err != nil {
 				return fmt.Errorf("\n problem with serverkeyexchange message: %v", err)
 
 			}
-			fmt.Println("`````")
-			fmt.Println("key exchange")
 		}
 
 		if err = serverData.serverHelloDone(); err != nil {
@@ -761,6 +761,9 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 	serverData.CipherDef.GetCipherSpecInfo()
 	if binary.BigEndian.Uint16(serverData.Version) >= uint16(TLS11Version) {
 		serverData.CipherDef.Spec.IvAsPayload = true
+	}
+	if binary.BigEndian.Uint16(serverData.Version) >= uint16(TLS12Version) {
+		serverData.CipherDef.Spec.HashBasedSigning = true
 	}
 
 	if serverData.CipherDef.Spec.SignatureAlgorithm != cipher.SignatureAlgorithmAnonymous && serverData.cert == nil {

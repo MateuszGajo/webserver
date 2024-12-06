@@ -21,12 +21,12 @@ func parseDSAPrivateKeyPCKS8(der []byte) (*dsa.PrivateKey, error) {
 
 	type Algorithm struct {
 		Algorithm any
-		Structt   Params
+		Params    Params
 	}
 
 	var k struct {
 		Version    int
-		Algorithm  Algorithm
+		Data       Algorithm
 		PrivateKey []byte
 	}
 
@@ -44,14 +44,14 @@ func parseDSAPrivateKeyPCKS8(der []byte) (*dsa.PrivateKey, error) {
 	}
 
 	// Compute the public key (Y = G^X mod P)
-	publicKey := new(big.Int).Exp(k.Algorithm.Structt.G, value, k.Algorithm.Structt.P)
+	publicKey := new(big.Int).Exp(k.Data.Params.G, value, k.Data.Params.P)
 
 	dsaKey := &dsa.PrivateKey{
 		PublicKey: dsa.PublicKey{
 			Parameters: dsa.Parameters{
-				P: k.Algorithm.Structt.P,
-				Q: k.Algorithm.Structt.Q,
-				G: k.Algorithm.Structt.G,
+				P: k.Data.Params.P,
+				Q: k.Data.Params.Q,
+				G: k.Data.Params.G,
 			},
 			Y: publicKey,
 		},
@@ -99,6 +99,50 @@ func parseDSAPrivateKey(der []byte) (*dsa.PrivateKey, error) {
 	}
 
 	return dsaKey, nil
+}
+
+type DhParams struct {
+	P       *big.Int
+	G       *big.Int
+	Private *big.Int
+}
+
+func parseDHParams(dhKeyBytes []byte) (*DhParams, error) {
+
+	type Params struct {
+		P, G *big.Int
+	}
+
+	type Algorithm struct {
+		Algorithm any
+		Params    Params
+	}
+
+	var privateKeyStructure struct {
+		Version    int
+		Data       Algorithm
+		PrivateKey []byte
+	}
+
+	_, err := asn1.Unmarshal(dhKeyBytes, &privateKeyStructure)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal DH parameters: %v", err)
+	}
+
+	fmt.Printf("\n %+v", privateKeyStructure)
+
+	var private *big.Int
+
+	_, err = asn1.Unmarshal(privateKeyStructure.PrivateKey, &private)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshaling ASN.1: %v", err)
+	}
+
+	return &DhParams{
+		P:       privateKeyStructure.Data.Params.P,
+		G:       privateKeyStructure.Data.Params.G,
+		Private: private,
+	}, nil
 }
 
 func (serverData *ServerData) parseCertificate(certFile, keyFile string) ([]byte, error) {
@@ -156,6 +200,16 @@ func (serverData *ServerData) parseCertificate(certFile, keyFile string) ([]byte
 		if binary.BigEndian.Uint16(serverData.Version) > uint16(SSL30Version) {
 			serverData.CipherDef.Rsa.LengthRecord = true
 		}
+	} else if cert.PublicKeyAlgorithm == x509.UnknownPublicKeyAlgorithm {
+
+		dhParams, err := parseDHParams(keyBlockBytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse DH parameters: %v", err)
+		}
+
+		serverData.CipherDef.DhParams.P = dhParams.P
+		serverData.CipherDef.DhParams.Q = dhParams.G
+		serverData.CipherDef.DhParams.Private = dhParams.Private
 	} else {
 		return nil, fmt.Errorf("\n unkown certificate with pub cert algorithm: %v", cert.PublicKeyAlgorithm)
 	}

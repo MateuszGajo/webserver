@@ -97,6 +97,7 @@ type CipherSpec struct {
 	ExportKeyMaterial       int
 	IvSize                  int
 	IvAsPayload             bool
+	HashBasedSigning        bool
 	HashAlgorithm           HashAlgorithm
 	HashAlgorithmIdentifier HashAlgorithmIdentifier
 	KeyExchange             KeyExchangeMethod
@@ -172,6 +173,10 @@ const (
 	CIPHER_SUITE_SSL_RSA_EXPORT_WITH_DES40_CBC_SHA  TLSCipherSuite = 0x0008
 	CIPHER_SUITE_SSL_RSA_WITH_DES_CBC_SHA           TLSCipherSuite = 0x0009
 	CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA      TLSCipherSuite = 0x000A
+	CIPHER_SUITE_SSL_RSA_WITH_AES_128_CBC_SHA       TLSCipherSuite = 0x002F
+	CIPHER_SUITE_SSL_RSA_WITH_AES_256_CBC_SHA       TLSCipherSuite = 0x0035
+	CIPHER_SUITE_SSL_RSA_WITH_AES_128_CBC_SHA256    TLSCipherSuite = 0x003C
+	CIPHER_SUITE_SSL_RSA_WITH_AES_256_CBC_SHA256    TLSCipherSuite = 0x003D
 	//Following cipher suite definition requires that server provide an rsa certificat ethat can be used for key exchange.
 	CIPHER_SUITE_SSL_DH_DSS_EXPORT_WITH_DES40_CBC_SHA  TLSCipherSuite = 0x000B
 	CIPHER_SUITE_SSL_DH_DSS_WITH_DES_CBC_SHA           TLSCipherSuite = 0x000C
@@ -185,7 +190,14 @@ const (
 	CIPHER_SUITE_SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA TLSCipherSuite = 0x0014
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SHA          TLSCipherSuite = 0x0015
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA     TLSCipherSuite = 0x0016
+	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_256_CBC_SHA      TLSCipherSuite = 0x0038
+	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_256_CBC_SHA      TLSCipherSuite = 0x0039
+	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_128_CBC_SHA256   TLSCipherSuite = 0x0040
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_128_CBC_SHA256   TLSCipherSuite = 0x0067
+	CIPHER_SUITE_SSL_DH_DSS_WITH_AES_256_CBC_SHA256    TLSCipherSuite = 0x0068
+	CIPHER_SUITE_SSL_DH_RSA_WITH_AES_256_CBC_SHA256    TLSCipherSuite = 0x0069
+	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_256_CBC_SHA256   TLSCipherSuite = 0x006A
+	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_256_CBC_SHA256   TLSCipherSuite = 0x006B
 	// Folowing cipher suited are used for server-authenticated (optianlly client) diffie-hellman. Dh denotes cipher suited in which the server-s certificate contains dh paramters signed by the  certificate authority.
 	// dhe denothes ephemral diffie-hellman where dh paramters are signed by dss or rsa cerificate, which has been signed by ca. The sigin algorithm used in specified after the dh or dhepparamter.
 	// In all case  the clie must have the same type of cerificate, and must use the dh paramters chosen by the server
@@ -219,6 +231,10 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 	CIPHER_SUITE_SSL_RSA_EXPORT_WITH_DES40_CBC_SHA:  "RSA_RSA_EXPORT_DES40_CBC_SHA",
 	CIPHER_SUITE_SSL_RSA_WITH_DES_CBC_SHA:           "RSA_RSA_WITH_DES_CBC_SHA",
 	CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA:      "RSA_RSA_WITH_3DES_EDE-CBC_SHA",
+	CIPHER_SUITE_SSL_RSA_WITH_AES_128_CBC_SHA:       "RSA_RSA_WITH_AES_128-CBC_SHA",
+	CIPHER_SUITE_SSL_RSA_WITH_AES_256_CBC_SHA:       "RSA_RSA_WITH_AES_256-CBC_SHA",
+	CIPHER_SUITE_SSL_RSA_WITH_AES_128_CBC_SHA256:    "RSA_RSA_WITH_AES_128-CBC_SHA256",
+	CIPHER_SUITE_SSL_RSA_WITH_AES_256_CBC_SHA256:    "RSA_RSA_WITH_AES_256-CBC_SHA256",
 	//Following cipher suite definition requires that server provide an rsa certificat ethat can be used for key exchange.
 	CIPHER_SUITE_SSL_DH_DSS_EXPORT_WITH_DES40_CBC_SHA:  "DH_DSS_EXPORT_DES40_CBC_SHA",
 	CIPHER_SUITE_SSL_DH_DSS_WITH_DES_CBC_SHA:           "DH_DSS_WITH_DES_CBC_SHA",
@@ -233,6 +249,13 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SHA:          "DHE_RSA_WITH_DES_CBC_SHA",
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:     "DHE_RSA_WITH_3DES_EDE-CBC_SHA",
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_128_CBC_SHA256:   "DHE_RSA_WITH_AES_128-CBC_SHA256",
+	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_256_CBC_SHA:      "DHE_DSS_WITH_AES_256-CBC_SHA",
+	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_256_CBC_SHA:      "DHE_RSA_WITH_AES_256-CBC_SHA",
+	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_128_CBC_SHA256:   "DHE_DSS_WITH_AES_128-CBC_SHA256",
+	CIPHER_SUITE_SSL_DH_DSS_WITH_AES_256_CBC_SHA256:    "DH_DSS_WITH_AES_256-CBC_SHA256",
+	CIPHER_SUITE_SSL_DH_RSA_WITH_AES_256_CBC_SHA256:    "DH_RSA_WITH_AES_256-CBC_SHA256",
+	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_256_CBC_SHA256:   "DHE_DSS_WITH_AES_256-CBC_SHA256",
+	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_256_CBC_SHA256:   "DHE_RSA_WITH_AES_256-CBC_SHA256",
 	// Folowing cipher suited are used for server-authenticated (optianlly client) diffie-hellman. Dh denotes cipher suited in which the server-s certificate contains dh paramters signed by the  certificate authority.
 	// dhe denothes ephemral diffie-hellman where dh paramters are signed by dss or rsa cerificate, which has been signed by ca. The sigin algorithm used in specified after the dh or dhepparamter.
 	// In all case  the clie must have the same type of cerificate, and must use the dh paramters chosen by the server
@@ -374,12 +397,15 @@ func (cipherDef *CipherDef) SignData(hash []byte) ([]byte, error) {
 		if cipherDef.Rsa.PrivateKey == nil {
 			return nil, fmt.Errorf("\n Cant find rsa private key")
 		}
-		fmt.Println("sing rsa")
-		fmt.Println(hash)
+
 		cryptoHash := crypto.Hash(0)
-		switch cipherDef.Spec.HashAlgorithm {
-		case HashAlgorithmSHA256:
-			cryptoHash = crypto.SHA256
+		if cipherDef.Spec.HashBasedSigning {
+			switch cipherDef.Spec.HashAlgorithm {
+			case HashAlgorithmSHA:
+				cryptoHash = crypto.SHA1
+			case HashAlgorithmSHA256:
+				cryptoHash = crypto.SHA256
+			}
 		}
 		signature, err := rsa.SignPKCS1v15(rand.Reader, cipherDef.Rsa.PrivateKey, cryptoHash, hash)
 
@@ -480,7 +506,19 @@ func (cipherDef *CipherDef) VerifySignedData(hash, signature []byte) error {
 var serverCipherPreferences = []TLSCipherSuite{
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA,
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_RC4_128_SHA,
+	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_256_CBC_SHA256,
+	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_256_CBC_SHA256,
+	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_256_CBC_SHA,
+	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_256_CBC_SHA,
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_128_CBC_SHA256,
+	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_128_CBC_SHA256,
+	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_128_CBC_SHA256,
+	CIPHER_SUITE_SSL_DH_DSS_WITH_AES_256_CBC_SHA256,
+	CIPHER_SUITE_SSL_DH_RSA_WITH_AES_256_CBC_SHA256,
+	CIPHER_SUITE_SSL_RSA_WITH_AES_128_CBC_SHA,
+	CIPHER_SUITE_SSL_RSA_WITH_AES_256_CBC_SHA,
+	CIPHER_SUITE_SSL_RSA_WITH_AES_128_CBC_SHA256,
+	CIPHER_SUITE_SSL_RSA_WITH_AES_256_CBC_SHA256,
 	CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA,
 	CIPHER_SUITE_SSL_DH_DSS_WITH_3DES_EDE_CBC_SHA,
 	CIPHER_SUITE_SSL_DH_RSA_WITH_3DES_EDE_CBC_SHA,

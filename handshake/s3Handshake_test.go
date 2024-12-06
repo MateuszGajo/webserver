@@ -543,6 +543,156 @@ func generateDSsCert() *HttpServerCertParam {
 	}
 }
 
+func generateRsaDHCert() *HttpServerCertParam {
+	cwd, err := os.Getwd()
+
+	if err != nil {
+		fmt.Errorf("cant get root path, err: %v", err)
+		os.Exit(1)
+	}
+	parentDir := filepath.Dir(cwd) + "/cert/rsa_dh_test"
+
+	_, err = os.Stat(parentDir)
+
+	if err != nil {
+		err = os.Mkdir(parentDir, 0775)
+		if err != nil {
+			fmt.Printf("problem creating folder, err: %v", err)
+			os.Exit(1)
+		}
+	}
+
+	cmd := exec.Command("openssl", "genrsa", "-out", "CAkey.pem", "1024")
+
+	cmd.Dir = parentDir
+
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		os.Exit(1)
+	}
+
+	cmd = exec.Command("openssl", "req", "-x509", "-new", "-nodes", "-key", "CAkey.pem", "-sha256", "-days", "3650", "-out", "CAcert.pem")
+
+	cmd.Dir = parentDir
+
+	stdin, err := cmd.StdinPipe()
+
+	if err != nil {
+		fmt.Printf("Error opening stdin pipe: %v\n", err)
+		os.Exit(1)
+	}
+
+	go func() {
+		defer stdin.Close()
+		io.WriteString(stdin, "US\n")
+		io.WriteString(stdin, "California\n")
+		io.WriteString(stdin, "San Francisco\n")
+		io.WriteString(stdin, "My Company\n")
+		io.WriteString(stdin, "San Francisco\n")
+		io.WriteString(stdin, "My Company\n")
+		io.WriteString(stdin, "My Unit\n")
+		io.WriteString(stdin, "example.com\n")
+		io.WriteString(stdin, "admin@example.com\n")
+	}()
+
+	output, err = cmd.CombinedOutput()
+
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		os.Exit(1)
+	}
+
+	cmd = exec.Command("openssl", "dhparam", "-out", "dhparam.pem", "1024")
+
+	cmd.Dir = parentDir
+
+	output, err = cmd.CombinedOutput()
+
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		os.Exit(1)
+	}
+
+	cmd = exec.Command("openssl", "genpkey", "-paramfile", "dhparam.pem", "-out", "dhkey.pem")
+
+	cmd.Dir = parentDir
+
+	output, err = cmd.CombinedOutput()
+
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		os.Exit(1)
+	}
+
+	cmd = exec.Command("openssl", "pkey", "-in", "dhkey.pem", "-pubout", "-out", "dhpubkey.pem")
+
+	cmd.Dir = parentDir
+
+	output, err = cmd.CombinedOutput()
+
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		os.Exit(1)
+	}
+
+	cmd = exec.Command("openssl", "genrsa", "-out", "rsakey.pem", "2048")
+	cmd.Dir = parentDir
+
+	output, err = cmd.CombinedOutput()
+
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		os.Exit(1)
+	}
+
+	cmd = exec.Command("openssl", "req", "-new", "-key", "rsakey.pem", "-out", "rsa.csr")
+	cmd.Dir = parentDir
+
+	stdin, err = cmd.StdinPipe()
+
+	if err != nil {
+		fmt.Printf("Error opening stdin pipe: %v\n", err)
+		os.Exit(1)
+	}
+
+	go func() {
+		defer stdin.Close()
+		io.WriteString(stdin, "US\n")
+		io.WriteString(stdin, "California\n")
+		io.WriteString(stdin, "San Francisco\n")
+		io.WriteString(stdin, "My Company\n")
+		io.WriteString(stdin, "San Francisco\n")
+		io.WriteString(stdin, "My Company\n")
+		io.WriteString(stdin, "My Unit\n")
+		io.WriteString(stdin, "example.com\n")
+		io.WriteString(stdin, "admin@example.com\n")
+	}()
+
+	output, err = cmd.CombinedOutput()
+
+	if err != nil {
+		fmt.Printf("Error running openssl command: %v\n, output: %s \n", err, output)
+		os.Exit(1)
+	}
+
+	cmd = exec.Command("openssl", "x509", "-req", "-in", "rsa.csr", "-CA", "CAcert.pem", "-CAkey", "CAkey.pem", "-force_pubkey", "dhpubkey.pem", "-out", "dhcert.pem", "-CAcreateserial")
+	cmd.Dir = parentDir
+
+	output, err = cmd.CombinedOutput()
+
+	if err != nil {
+		fmt.Printf("Error opening stdin pipe: %v\n", err)
+		os.Exit(1)
+	}
+
+	return &HttpServerCertParam{
+		CertPath: parentDir + "/dhcert.pem",
+		KeyPath:  parentDir + "/dhkey.pem",
+	}
+}
+
 func generateRsaCert(weak bool) *HttpServerCertParam {
 	cwd, err := os.Getwd()
 	if err != nil {

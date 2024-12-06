@@ -1,6 +1,9 @@
 package handshake
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestHandshakeOpenT12_ADH_DES_CBC3_SHA(t *testing.T) {
 	server := startServer(nil, TLS12Version)
@@ -43,24 +46,48 @@ func TestHandshakeOpenT12_RC4_SHA(t *testing.T) {
 	}
 }
 
-// func TestHandshakeOpenT12_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
-// 	params := generateRsaCert(false)
+func TestHandshakeOpenT12_EDH_RSA_AES128_SHA256(t *testing.T) {
+	params := generateRsaCert(false)
 
-// 	server := startServer(params, TLS12Version)
-// 	defer StopServer(*server)
+	server := startServer(params, TLS12Version)
+	defer StopServer(*server)
 
-// 	if err := runOpensslCommand([]string{"-cipher", "EDH-RSA-DES-CBC3-SHA", "-tls1_2", "-reconnect"}); err != nil {
-// 		t.Error(err)
-// 	}
-// }
+	if err := runOpensslCommand([]string{"-cipher", "DHE-RSA-AES128-SHA256", "-tls1_2", "-reconnect"}); err != nil {
+		t.Error(err)
+	}
+}
 
-// func TestHandshakeOpenT12_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
-// 	params := generateDSsCert()
+func TestHandshakeOpenT12_EDH_RSA_AES256_SHA256(t *testing.T) {
+	params := generateRsaCert(false)
 
-// 	server := startServer(params, TLS12Version)
-// 	defer StopServer(*server)
+	server := startServer(params, TLS12Version)
+	defer StopServer(*server)
 
-// 	if err := runOpensslCommand([]string{"-cipher", "EDH-DSS-DES-CBC3-SHA", "-tls1_2", "-reconnect"}); err != nil {
-// 		t.Error(err)
-// 	}
-// }
+	if err := runOpensslCommand([]string{"-cipher", "DHE-RSA-AES256-SHA256", "-tls1_2", "-reconnect"}); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestHandshakeOpenT12_EDH_RSA_AES256_SHA(t *testing.T) {
+	params := generateRsaCert(false)
+
+	server := startServer(params, TLS12Version)
+	defer StopServer(*server)
+
+	if err := runOpensslCommand([]string{"-cipher", "DHE-RSA-AES256-SHA", "-tls1_2", "-reconnect"}); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestHandshakeOpenT12_dds(t *testing.T) {
+	params := generateRsaDHCert()
+
+	fmt.Println(params)
+
+	server := startServer(params, TLS12Version)
+	defer StopServer(*server)
+
+	if err := runOpensslCommand([]string{"-cipher", "DH-RSA-AES256-SHA256", "-tls1_2", "-reconnect"}); err != nil {
+		t.Error(err)
+	}
+}
