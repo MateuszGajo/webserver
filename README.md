@@ -1,5 +1,5 @@
 # About
-## Descrription
+## Description
 PROJECT IN DEVELOPMENT PHASE! Don't use in production.
 
 # How to run project
