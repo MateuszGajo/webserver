@@ -106,7 +106,6 @@ openssl x509 -req -in rsa.csr -CA CAcert.pem -CAkey CAkey.pem -force_pubkey dhpu
 ## DSS/DH cert
 
 ### Step 1: Create CA 
-1. Generate the CA Private Key
 openssl dsaparam -out dsaparam.pem 2048
 
 openssl gendsa -out CAkey.pem dsaparam.pem
