@@ -974,76 +974,6 @@ func (serverData *ServerData) handleHandshakeClientKeyExchange(contentData []byt
 	return nil
 }
 
-func (serverData *ServerData) calculateExportableFinalWriteKey(clientKey, serverKey []byte, length int) [][]byte {
-	seed := []byte{}
-	seed = append(seed, serverData.ClientRandom...)
-	seed = append(seed, serverData.ServerRandom...)
-	// ssl 3.0 uses different seed for calculating server write key
-	extraSeed := []byte{}
-	extraSeed = append(extraSeed, serverData.ServerRandom...)
-	extraSeed = append(extraSeed, serverData.ClientRandom...)
-
-	result := make([][]byte, 0, 2)
-	switch binary.BigEndian.Uint16(serverData.Version) {
-	case 0x0300:
-		clientWriteKey := serverData.s3CalculateExportableFinalWriteKey(clientKey, seed, length)
-		serverWriteKey := serverData.s3CalculateExportableFinalWriteKey(serverKey, extraSeed, length)
-		result = append(result, clientWriteKey)
-		result = append(result, serverWriteKey)
-		return result
-	case 0x0301, 0x0302, 0x0303:
-		clientWriteKey := serverData.prf(clientKey, seed, []byte("client write key"), length)
-		serverWriteKey := serverData.prf(serverKey, seed, []byte("server write key"), length)
-		result = append(result, clientWriteKey)
-		result = append(result, serverWriteKey)
-		return result
-	}
-	fmt.Println("should never enter this state in export final write key")
-	os.Exit(1)
-	return [][]byte{}
-
-}
-
-func (serverData *ServerData) s3CalculateExportableFinalWriteKey(key, seed []byte, length int) []byte {
-	hash := md5.New()
-
-	hash.Write(key)
-	hash.Write(seed)
-
-	return hash.Sum(nil)[:length]
-
-}
-
-func (serverData *ServerData) calculateExportableFinalIv(seed, serverSeed []byte) [][]byte {
-	result := make([][]byte, 0, 2)
-	switch binary.BigEndian.Uint16(serverData.Version) {
-	case 0x0300:
-		ivClient := serverData.s3CalculateExportableFinalIv(seed, serverData.CipherDef.Spec.IvSize)
-		ivServer := serverData.s3CalculateExportableFinalIv(serverSeed, serverData.CipherDef.Spec.IvSize)
-		result = append(result, ivClient)
-		result = append(result, ivServer)
-		return result
-	case 0x0301, 0x0302, 0x0303:
-		iv := serverData.prf([]byte{}, seed, []byte("IV block"), 2*serverData.CipherDef.Spec.IvSize)
-		result = append(result, iv[:serverData.CipherDef.Spec.IvSize])
-		result = append(result, iv[serverData.CipherDef.Spec.IvSize:])
-		return result
-	}
-	fmt.Println("should never enter this state in export final iv")
-	os.Exit(1)
-	return [][]byte{}
-
-}
-
-func (serverData *ServerData) s3CalculateExportableFinalIv(seed []byte, length int) []byte {
-	hash := md5.New()
-
-	hash.Write(seed)
-
-	return hash.Sum(nil)[:length]
-
-}
-
 var keyBlockLabel = map[uint16][]byte{
 	0x0300: nil,
 	0x0301: []byte("key expansion"),
@@ -1110,47 +1040,6 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) error {
 		WriteKeyServer: keyBlock[serverData.CipherDef.Spec.HashSize*2+serverData.CipherDef.Spec.KeyMaterial : writeKeyEndIndex],
 		IVClient:       keyBlock[writeKeyEndIndex : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize],
 		IVServer:       keyBlock[writeKeyEndIndex+serverData.CipherDef.Spec.IvSize : writeKeyEndIndex+serverData.CipherDef.Spec.IvSize*2],
-	}
-	fmt.Println("Key block")
-	fmt.Printf("\n%+v", cipherDefKeys)
-	if serverData.CipherDef.Spec.IsExportable {
-		clientSeed := []byte{}
-		clientSeed = append(clientSeed, serverData.ClientRandom...)
-		clientSeed = append(clientSeed, serverData.ServerRandom...)
-		serverSeed := []byte{}
-		serverSeed = append(serverSeed, serverData.ServerRandom...)
-		serverSeed = append(serverSeed, serverData.ClientRandom...)
-
-		clientWriteKeys := serverData.calculateExportableFinalWriteKey(cipherDefKeys.WriteKeyClient, cipherDefKeys.WriteKeyServer, serverData.CipherDef.Spec.ExportKeyMaterial)
-		clientWriteKey := clientWriteKeys[0]
-		serverWriteKey := clientWriteKeys[1]
-
-		if len(clientWriteKey) != serverData.CipherDef.Spec.ExportKeyMaterial {
-			return fmt.Errorf("client write key should be of length: %v, insted we got: %v", serverData.CipherDef.Spec.ExportKeyMaterial, len(clientWriteKey))
-		}
-
-		if len(serverWriteKey) != serverData.CipherDef.Spec.ExportKeyMaterial {
-			return fmt.Errorf("server write key should be of length: %v", serverData.CipherDef.Spec.ExportKeyMaterial)
-		}
-
-		cipherDefKeys.WriteKeyClient = clientWriteKey[:serverData.CipherDef.Spec.ExportKeyMaterial]
-		cipherDefKeys.WriteKeyServer = serverWriteKey[:serverData.CipherDef.Spec.ExportKeyMaterial]
-
-		iv := serverData.calculateExportableFinalIv(clientSeed, serverSeed)
-		if len(iv) < 2 {
-			return fmt.Errorf("export final iv should return two iv, client and server, insted it returned length: %v", len(iv))
-		}
-
-		if len(iv[0]) != serverData.CipherDef.Spec.IvSize {
-			return fmt.Errorf("client iv should be of length: %v, insted we got: %v", serverData.CipherDef.Spec.IvSize, len(iv[0]))
-		}
-
-		if len(iv[1]) != serverData.CipherDef.Spec.IvSize {
-			return fmt.Errorf("server iv should be of length: %v, insted we got: %v", serverData.CipherDef.Spec.IvSize, len(iv[1]))
-		}
-
-		cipherDefKeys.IVClient = iv[0]
-		cipherDefKeys.IVServer = iv[1]
 	}
 
 	serverData.CipherDef.Keys = cipherDefKeys

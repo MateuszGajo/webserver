@@ -39,9 +39,10 @@ func (serverData *ServerData) T12GetServerKeyExchangeMessage() ([]byte, error) {
 	//	hash = append(hash, keyExchangeParams...)
 
 	case cipher.SignatureAlgorithmDSA:
+		// DSA supports only sha1
+		var hashAlgorithm = sha1.New()
 
-		shaHash := signatureHash(sha1.New(), serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
-		hash = append(hash, shaHash...)
+		hash = signatureHash(hashAlgorithm, serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
 	default:
 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return nil, fmt.Errorf("unsupported Algorithm: %v", serverData.CipherDef.Spec.SignatureAlgorithm)

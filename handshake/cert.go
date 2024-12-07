@@ -201,10 +201,12 @@ func (serverData *ServerData) parseCertificate(certFile, keyFile string) ([]byte
 			serverData.CipherDef.Rsa.LengthRecord = true
 		}
 	} else if cert.PublicKeyAlgorithm == x509.UnknownPublicKeyAlgorithm {
+		fmt.Printf("\n %+v", cert)
+		// fmt.Println(cert)
 
 		dhParams, err := parseDHParams(keyBlockBytes)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse DH parameters: %v", err)
+			return nil, fmt.Errorf("trying to parse unknown key algorithm as dh embeded but failed: %v", err)
 		}
 
 		serverData.CipherDef.DhParams.P = dhParams.P

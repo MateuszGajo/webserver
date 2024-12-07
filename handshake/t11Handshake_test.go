@@ -22,7 +22,7 @@ func TestHandshakeOpenT11_ADH_RC4_MD5(t *testing.T) {
 }
 
 func TestHandshakeOpenT11_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert(false)
+	params := generateRsaCert()
 
 	server := startServer(params, TLS11Version)
 	defer StopServer(*server)
@@ -33,7 +33,7 @@ func TestHandshakeOpenT11_DES_CBC3_SHA(t *testing.T) {
 }
 
 func TestHandshakeOpenT11_RC4_SHA(t *testing.T) {
-	params := generateRsaCert(false)
+	params := generateRsaCert()
 
 	server := startServer(params, TLS11Version)
 	defer StopServer(*server)
@@ -44,7 +44,7 @@ func TestHandshakeOpenT11_RC4_SHA(t *testing.T) {
 }
 
 func TestHandshakeOpenT11_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert(false)
+	params := generateRsaCert()
 
 	server := startServer(params, TLS11Version)
 	defer StopServer(*server)

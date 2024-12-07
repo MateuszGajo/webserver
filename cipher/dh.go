@@ -58,7 +58,6 @@ type DhComponent struct {
 	public  *big.Int
 }
 
-var staticDh *DhComponent
 var staticDhWeak *DhComponent
 
 func generatePrivateKey(p *big.Int) (*big.Int, error) {
@@ -76,12 +75,9 @@ func computePublicKey(g, privateKey, p *big.Int) *big.Int {
 	return publicKey
 }
 
-func generateDhComponents(weakKey bool) (*DhComponent, error) {
+func generateDhComponents() (*DhComponent, error) {
 	keyLength := 2048
 
-	if weakKey {
-		keyLength = 512
-	}
 	p, err := rsa.GenerateKey(rand.Reader, keyLength)
 	if err != nil {
 		return nil, fmt.Errorf("problem generating p: %v", err)
@@ -103,28 +99,13 @@ func generateDhComponents(weakKey bool) (*DhComponent, error) {
 	}, nil
 }
 
-func (dh *DhParams) GenerateDhParams(weakKey bool, ephemeral bool) ([]byte, error) {
+func (dh *DhParams) GenerateDhParams(ephemeral bool) ([]byte, error) {
 	//Ephemeral Diffie-Hellman (DHE in the context of TLS) differs from the static Diffie-Hellman (DH) in the way that static Diffie-Hellman key exchanges always use the same Diffie-Hellman private keys. So, each time the same parties do a DH key exchange, they end up with the same shared secret.
 	// https://mbed-tls.readthedocs.io/en/latest/kb/cryptography/ephemeral-diffie-hellman/
 	var dhComponent *DhComponent
 	var err error
 
-	if weakKey {
-		if staticDhWeak != nil && !ephemeral {
-			dhComponent = staticDhWeak
-		} else {
-			dhComponent, err = generateDhComponents(true)
-			staticDhWeak = dhComponent
-		}
-	} else {
-		if staticDh != nil && !ephemeral {
-			dhComponent = staticDh
-		} else {
-			dhComponent, err = generateDhComponents(weakKey)
-			staticDh = dhComponent
-		}
-
-	}
+	dhComponent, err = generateDhComponents()
 
 	if err != nil {
 		return nil, err

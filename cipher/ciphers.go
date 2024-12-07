@@ -191,6 +191,7 @@ const (
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SHA          TLSCipherSuite = 0x0015
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA     TLSCipherSuite = 0x0016
 	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_256_CBC_SHA      TLSCipherSuite = 0x0038
+	CIPHER_SUITE_SSL_DH_RSA_WITH_AES_128_CBC_SHA256    TLSCipherSuite = 0x003F
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_256_CBC_SHA      TLSCipherSuite = 0x0039
 	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_128_CBC_SHA256   TLSCipherSuite = 0x0040
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_128_CBC_SHA256   TLSCipherSuite = 0x0067
@@ -248,6 +249,7 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 	CIPHER_SUITE_SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA: "DHE_RSA_EXPORT_DES40_CBC_SHA",
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SHA:          "DHE_RSA_WITH_DES_CBC_SHA",
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA:     "DHE_RSA_WITH_3DES_EDE-CBC_SHA",
+	CIPHER_SUITE_SSL_DH_RSA_WITH_AES_128_CBC_SHA256:    "DH_RSA_WITH_AES_128-CBC_SHA256",
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_128_CBC_SHA256:   "DHE_RSA_WITH_AES_128-CBC_SHA256",
 	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_256_CBC_SHA:      "DHE_DSS_WITH_AES_256-CBC_SHA",
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_256_CBC_SHA:      "DHE_RSA_WITH_AES_256-CBC_SHA",
@@ -381,7 +383,7 @@ func (cipherDef *CipherDef) GenerateServerKeyExchange() ([]byte, error) {
 
 	switch cipherDef.Spec.KeyExchange {
 	case KeyExchangeMethodDH:
-		return cipherDef.DhParams.GenerateDhParams(cipherDef.Spec.IsExportable, cipherDef.Spec.KeyExchangeRotation)
+		return cipherDef.DhParams.GenerateDhParams(cipherDef.Spec.KeyExchangeRotation)
 	case KeyExchangeMethodRSA:
 		return []byte{}, nil
 	default:
@@ -515,10 +517,11 @@ var serverCipherPreferences = []TLSCipherSuite{
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_128_CBC_SHA256,
 	CIPHER_SUITE_SSL_DH_DSS_WITH_AES_256_CBC_SHA256,
 	CIPHER_SUITE_SSL_DH_RSA_WITH_AES_256_CBC_SHA256,
-	CIPHER_SUITE_SSL_RSA_WITH_AES_128_CBC_SHA,
-	CIPHER_SUITE_SSL_RSA_WITH_AES_256_CBC_SHA,
-	CIPHER_SUITE_SSL_RSA_WITH_AES_128_CBC_SHA256,
+	CIPHER_SUITE_SSL_DH_RSA_WITH_AES_128_CBC_SHA256,
 	CIPHER_SUITE_SSL_RSA_WITH_AES_256_CBC_SHA256,
+	CIPHER_SUITE_SSL_RSA_WITH_AES_128_CBC_SHA256,
+	CIPHER_SUITE_SSL_RSA_WITH_AES_256_CBC_SHA,
+	CIPHER_SUITE_SSL_RSA_WITH_AES_128_CBC_SHA,
 	CIPHER_SUITE_SSL_RSA_WITH_3DES_EDE_CBC_SHA,
 	CIPHER_SUITE_SSL_DH_DSS_WITH_3DES_EDE_CBC_SHA,
 	CIPHER_SUITE_SSL_DH_RSA_WITH_3DES_EDE_CBC_SHA,
@@ -639,14 +642,11 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 	}
 	keyExchange := cipherSuitParts[0]
 	singinAlgorithm := cipherSuitParts[1]
-	exportMode := cipherSuitParts[2]
 	encryptionAlgorithm := cipherSuitParts[3]
 	encryptionAlgorithmParams := strings.Split(cipherSuitParts[4], "-")
 	encryptionAlgorithmWithParams := []string{encryptionAlgorithm}
 	encryptionAlgorithmWithParams = append(encryptionAlgorithmWithParams, encryptionAlgorithmParams...)
 	hashingMethod := cipherSuitParts[5]
-
-	exportable := exportMode == "EXPORT"
 
 	switch keyExchange {
 	case "DH":
@@ -659,25 +659,6 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 	default:
 		fmt.Printf("\n key exchange method not implemented: %v", keyExchange)
 		os.Exit(1)
-	}
-
-	switch singinAlgorithm {
-	case "DSS":
-		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmDSA
-		cipherDef.Spec.SignatureAlgorithmIdentifier = SignatureAlgorithmNumberDsa
-	case "RSA":
-		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA
-		cipherDef.Spec.SignatureAlgorithmIdentifier = SignatureAlgorithmNumberRsa
-	case "anon":
-		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmAnonymous
-		cipherDef.Spec.SignatureAlgorithmIdentifier = SignatureAlgorithmNumberAnonymous
-	default:
-		fmt.Printf("\n singinAlgorithm not implemented: %v", singinAlgorithm)
-		os.Exit(1)
-	}
-
-	if exportable {
-		cipherDef.Spec.IsExportable = true
 	}
 
 	switch encryptionAlgorithm {
@@ -768,5 +749,28 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 		fmt.Printf("\n hashing method not implemented: %v", hashingMethod)
 		os.Exit(1)
 	}
+
+	switch singinAlgorithm {
+	case "DSS":
+		// 	  Because DSA signatures do not contain any secure indication of hash
+		//    algorithm, there is a risk of hash substitution if multiple hashes
+		//    may be used with any key.  Currently, DSA [DSS] may only be used with
+		//    SHA-1.  Future revisions of DSS [DSS-3] are expected to allow the use
+		//    of other digest algorithms with DSA.
+		cipherDef.Spec.HashAlgorithmIdentifier = HashAlgorithmNumberSha1
+
+		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmDSA
+		cipherDef.Spec.SignatureAlgorithmIdentifier = SignatureAlgorithmNumberDsa
+	case "RSA":
+		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA
+		cipherDef.Spec.SignatureAlgorithmIdentifier = SignatureAlgorithmNumberRsa
+	case "anon":
+		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmAnonymous
+		cipherDef.Spec.SignatureAlgorithmIdentifier = SignatureAlgorithmNumberAnonymous
+	default:
+		fmt.Printf("\n singinAlgorithm not implemented: %v", singinAlgorithm)
+		os.Exit(1)
+	}
+
 	return nil
 }

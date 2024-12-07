@@ -37,7 +37,6 @@ Other ciphers can work but hasn't been tested yet.
 Project supports following ciphers of tls1.0 (based on rfc 2246):
 * ADH-DES-CBC3-SHA
 * ADH-RC4-MD5
-* EXP-ADH-RC4-MD5
 * DES-CBC3-SHA
 * RC4-SHA
 * EDH-DSS-DES-CBC3-SHA
@@ -63,18 +62,26 @@ Project supports following ciphers of tls1.2:
 * EDH-DSS-DES-CBC3-SHA
 * EDH-RSA-DES-CBC3-SHA
 * DHE-RSA-AES256-SHA
+* DHE-RSA-AES256-SHA
 * DHE-RSA-AES128-SHA256
 * DHE-RSA-AES256-SHA256
 * DH-RSA-AES256-SHA256
+* DH-DSS-AES256-SHA256
+* DHE-DSS-AES256-SHA256
+* DHE-DSS-AES256-SHA
+
+
 
 ## Supported features
 * session resumption
 
 # Certificates
 
-## RSA/DH cert
+## DH embeded certs
 
-There are some ciphers that uses RSA cert with DH params embeded in it, Kx=DH/RSA Au=DH. There are not many resources on that, u can follow instruction below to create this cert. It uses -force_pubkey flag which was added in openssl 1.0.2.
+There are some ciphers that uses RSA/DSS etc with DH params embeded in it, eg Kx=DH/RSA, Kx=DH/DSS Au=DH. There are not many resources on that, u can follow instruction below to create this cert. It uses -force_pubkey flag which was added in openssl 1.0.2.
+
+## RSA/DH cert
 
 ### Step 1: Create CA
 openssl genrsa -out CAkey.pem 2048
@@ -95,3 +102,28 @@ openssl req -new -key rsakey.pem -out rsa.csr
 
 ### Step 4: Generate the DH Certificate
 openssl x509 -req -in rsa.csr -CA CAcert.pem -CAkey CAkey.pem -force_pubkey dhpubkey.pem -out dhcert.pem -CAcreateserial
+
+## DSS/DH cert
+
+### Step 1: Create CA 
+1. Generate the CA Private Key
+openssl dsaparam -out dsaparam.pem 2048
+
+openssl gendsa -out CAkey.pem dsaparam.pem
+
+openssl req -x509 -new -key CAkey.pem -sha256 -days 3650 -out CAcert.pem
+
+### Step 2: Create DH Parameters and Keys
+openssl dhparam -out dhparam.pem 1024
+
+openssl genpkey -paramfile dhparam.pem -out dhkey.pem
+
+openssl pkey -in dhkey.pem -pubout -out dhpubkey.pem
+
+### Step 3: Create a DSA Key and CSR
+openssl gendsa -out dsakey.pem dsaparam.pem
+
+openssl req -new -key dsakey.pem -out dsa.csr
+
+### Step 4: Generate the DH Certificate
+openssl x509 -req -in dsa.csr -CA CAcert.pem -CAkey CAkey.pem -force_pubkey dhpubkey.pem -out dssdhcert.pem -CAcreateserial

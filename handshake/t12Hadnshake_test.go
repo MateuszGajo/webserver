@@ -25,7 +25,7 @@ func TestHandshakeOpenT12_ADH_RC4_MD5(t *testing.T) {
 }
 
 func TestHandshakeOpenT12_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert(false)
+	params := generateRsaCert()
 
 	server := startServer(params, TLS12Version)
 	defer StopServer(*server)
@@ -36,7 +36,7 @@ func TestHandshakeOpenT12_DES_CBC3_SHA(t *testing.T) {
 }
 
 func TestHandshakeOpenT12_RC4_SHA(t *testing.T) {
-	params := generateRsaCert(false)
+	params := generateRsaCert()
 
 	server := startServer(params, TLS12Version)
 	defer StopServer(*server)
@@ -47,7 +47,7 @@ func TestHandshakeOpenT12_RC4_SHA(t *testing.T) {
 }
 
 func TestHandshakeOpenT12_EDH_RSA_AES128_SHA256(t *testing.T) {
-	params := generateRsaCert(false)
+	params := generateRsaCert()
 
 	server := startServer(params, TLS12Version)
 	defer StopServer(*server)
@@ -58,7 +58,7 @@ func TestHandshakeOpenT12_EDH_RSA_AES128_SHA256(t *testing.T) {
 }
 
 func TestHandshakeOpenT12_EDH_RSA_AES256_SHA256(t *testing.T) {
-	params := generateRsaCert(false)
+	params := generateRsaCert()
 
 	server := startServer(params, TLS12Version)
 	defer StopServer(*server)
@@ -69,7 +69,7 @@ func TestHandshakeOpenT12_EDH_RSA_AES256_SHA256(t *testing.T) {
 }
 
 func TestHandshakeOpenT12_EDH_RSA_AES256_SHA(t *testing.T) {
-	params := generateRsaCert(false)
+	params := generateRsaCert()
 
 	server := startServer(params, TLS12Version)
 	defer StopServer(*server)
@@ -79,7 +79,20 @@ func TestHandshakeOpenT12_EDH_RSA_AES256_SHA(t *testing.T) {
 	}
 }
 
-func TestHandshakeOpenT12_dds(t *testing.T) {
+func TestHandshakeOpenT12_DH_RSA_AES128_SHA256(t *testing.T) {
+	params := generateRsaDHCert()
+
+	fmt.Println(params)
+
+	server := startServer(params, TLS12Version)
+	defer StopServer(*server)
+
+	if err := runOpensslCommand([]string{"-cipher", "DH-RSA-AES128-SHA256", "-tls1_2", "-reconnect"}); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestHandshakeOpenT12_DH_RSA_AES256_SHA256(t *testing.T) {
 	params := generateRsaDHCert()
 
 	fmt.Println(params)
@@ -88,6 +101,45 @@ func TestHandshakeOpenT12_dds(t *testing.T) {
 	defer StopServer(*server)
 
 	if err := runOpensslCommand([]string{"-cipher", "DH-RSA-AES256-SHA256", "-tls1_2", "-reconnect"}); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestHandshakeOpenT12_DHE_DSS_AES256_SHA256(t *testing.T) {
+	params := generateDSsCert()
+
+	fmt.Println(params)
+
+	server := startServer(params, TLS12Version)
+	defer StopServer(*server)
+
+	if err := runOpensslCommand([]string{"-cipher", "DHE-DSS-AES256-SHA256", "-tls1_2", "-reconnect"}); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestHandshakeOpenT12_DHE_DSS_AES256_SHA(t *testing.T) {
+	params := generateDSsCert()
+
+	fmt.Println(params)
+
+	server := startServer(params, TLS12Version)
+	defer StopServer(*server)
+
+	if err := runOpensslCommand([]string{"-cipher", "DHE-DSS-AES256-SHA", "-tls1_2", "-reconnect"}); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestHandshakeOpenT12_DH_DSS_AES256_SHA256(t *testing.T) {
+	params := generateDssDHCert()
+
+	fmt.Println(params)
+
+	server := startServer(params, TLS12Version)
+	defer StopServer(*server)
+
+	if err := runOpensslCommand([]string{"-cipher", "DH-DSS-AES256-SHA256", "-tls1_2", "-reconnect"}); err != nil {
 		t.Error(err)
 	}
 }
