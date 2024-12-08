@@ -6,9 +6,9 @@ PROJECT IN DEVELOPMENT PHASE! Don't use in production.
 1. Download openssl, for testing older version use e.g 0.9.7e
 2. Extract data
 3. Create certificate (rsa, dss, rsa/dh) if needed, remeber some cipher suites needs to be created with weak key, look at #Certificates section
-4. Run project using `go run .` or  `go run . -cert "cert path" -key "key path"` if using certificate
-5. Connect openssl to the server using `./openssl s_client -connect 127.0.0.1:4221 -"version" -cipher "CIPHER"`
-6. If everything went successfully you should see handshake details information, look for `New, TLSv1/SSLv3, Cipher is YOUR CIPHER`
+4. Run project using `go run .` or  `go run . -cert <cert path> -key <key path>` if using a certificate
+5. Connect openssl to the server using `./openssl s_client -connect 127.0.0.1:4221 -<version> -cipher <cipher>`
+6. If everything went successfully you should see handshake details information, look for `New, TLSv1/SSLv3, Cipher is`
 
 
 # How to run test
