@@ -74,8 +74,8 @@ Project supports following ciphers of tls1.2:
 * session resumption
 
 ## Supported extensions
-* Heart beat
-* Signature Algorithms
+* heart beat
+* signature algorithms
 
 # Certificates
 
