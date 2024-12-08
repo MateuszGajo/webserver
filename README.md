@@ -12,10 +12,10 @@ PROJECT IN DEVELOPMENT PHASE! Don't use in production.
 
 
 # How to run test
-1. Download openssl version supporting ssl 3.0, tls 1.0 (recommended openssl 0.9.7e)
+1. Download openssl prefered version, e.g openssl 0.9.7e to use ssl3.0
 2. Extract data in openssl folder
-3. Make variable "OpenSSLVersion" in handshake_test.go if needed
-4. run `go test ./...`
+3. Update "OpenSSLVersion" variable s3Handshake_test.go
+4. In main folder run `go test ./...`
 
 
 # ciphers
