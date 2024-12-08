@@ -92,23 +92,23 @@ const (
 )
 
 type CipherSpec struct {
-	HashSize                int
-	KeyMaterial             int
-	ExportKeyMaterial       int
-	IvSize                  int
-	IvAsPayload             bool
-	HashBasedSigning        bool
-	HashAlgorithm           HashAlgorithm
-	HashAlgorithmIdentifier HashAlgorithmIdentifier
-	KeyExchange             KeyExchangeMethod
+	HashSize                   int
+	KeyMaterial                int
+	ExportKeyMaterial          int
+	IvSize                     int
+	IvAsPayload                bool
+	HashBasedSigning           bool
+	HashAlgorithm              HashAlgorithm
+	ExtHashAlgorithmIdentifier HashAlgorithmIdentifier
+	KeyExchange                KeyExchangeMethod
 	// Use this paramter when using DHE key exchange, as dh has almost the same implementation to dhe
-	KeyExchangeRotation          bool
-	EncryptionAlgorithm          EncryptionAlgorithm
-	SignatureAlgorithm           SignatureAlgorithm
-	SignatureAlgorithmIdentifier SignatureAlgorithmIdentifier
-	CompressionMethod            CompressionMethod
-	IsExportable                 bool
-	PaddingType                  PaddingType
+	KeyExchangeRotation             bool
+	EncryptionAlgorithm             EncryptionAlgorithm
+	SignatureAlgorithm              SignatureAlgorithm
+	ExtSignatureAlgorithmIdentifier SignatureAlgorithmIdentifier
+	CompressionMethod               CompressionMethod
+	IsExportable                    bool
+	PaddingType                     PaddingType
 }
 
 type CipherDef struct {
@@ -275,7 +275,6 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 
 func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []byte) ([]byte, error) {
 	if !cipherDef.Spec.IvAsPayload {
-		fmt.Println("data as not paylod NOT NOT")
 		cipherDef.Keys.IVClient = encryptedData[len(encryptedData)-8:]
 	}
 
@@ -293,9 +292,6 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []
 	case EncryptionAlgorithmRC2:
 		decryptedData, err = cipherDef.DecryptRC2(encryptedData, writeKey, iv)
 	case EncryptionAlgorithmAES:
-		fmt.Println("decrypt with aes")
-		fmt.Println("writekey")
-		fmt.Println(writeKey)
 		decryptedData, err = DecryptAESMessage(encryptedData, writeKey, iv)
 	default:
 		return []byte{}, fmt.Errorf("decryption algorithm: %v not implemented", cipherDef.Spec.EncryptionAlgorithm)
@@ -304,7 +300,6 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []
 		return nil, err
 	}
 	if cipherDef.Spec.IvAsPayload {
-		fmt.Println("Datas payload AS AS AS ")
 		if cipherDef.Spec.IvSize == 0 {
 			return decryptedData, nil
 		}
@@ -334,7 +329,6 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) ([]
 	case EncryptionAlgorithmRC2:
 		encryptedMsg, err = cipherDef.EncryptRC2(data, writeKey, iv)
 	case EncryptionAlgorithmAES:
-		fmt.Println("Encrypt with aes")
 		encryptedMsg, err = cipherDef.EncryptAESMessage(data, writeKey, iv)
 	default:
 		return []byte{}, fmt.Errorf("encryption algorithm: %v not implemented", cipherDef.Spec.EncryptionAlgorithm)
@@ -402,11 +396,23 @@ func (cipherDef *CipherDef) SignData(hash []byte) ([]byte, error) {
 
 		cryptoHash := crypto.Hash(0)
 		if cipherDef.Spec.HashBasedSigning {
-			switch cipherDef.Spec.HashAlgorithm {
-			case HashAlgorithmSHA:
+			switch cipherDef.Spec.ExtHashAlgorithmIdentifier {
+			case HashAlgorithmNumberNone:
+				return nil, fmt.Errorf("key exchange should be hashed, we got value none hash algorithm")
+			case HashAlgorithmNumberMd5:
+				cryptoHash = crypto.MD5
+			case HashAlgorithmNumberSha1:
 				cryptoHash = crypto.SHA1
-			case HashAlgorithmSHA256:
+			case HashAlgorithmNumberSha224:
+				cryptoHash = crypto.SHA224
+			case HashAlgorithmNumberSha256:
 				cryptoHash = crypto.SHA256
+			case HashAlgorithmNumberSha384:
+				cryptoHash = crypto.SHA384
+			case HashAlgorithmNumberSha512:
+				cryptoHash = crypto.SHA512
+			default:
+				return nil, fmt.Errorf("hash algorithm not implemented in singData, trying to use: %v", cipherDef.Spec.ExtHashAlgorithmIdentifier)
 			}
 		}
 		signature, err := rsa.SignPKCS1v15(rand.Reader, cipherDef.Rsa.PrivateKey, cryptoHash, hash)
@@ -685,7 +691,6 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 		cipherDef.Spec.IvSize = 8
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmRC2
 	case "AES":
-		fmt.Println("hello aes?")
 		// Just for sake not backward compability breaking
 	default:
 		fmt.Printf("\n encryption algorithm not implemented: %v", encryptionAlgorithm)
@@ -721,7 +726,6 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 	// 3DES_EDE_CBC  Block      24       8      8
 	// AES_128_CBC   Block      16      16     16
 	// AES_256_CBC   Block      32      16     16
-	fmt.Println(strings.Join(encryptionAlgorithmWithParams, "_"))
 	switch strings.Join(encryptionAlgorithmWithParams, "_") {
 	case "AES_128_CBC":
 		cipherDef.Spec.IvSize = 16
@@ -736,15 +740,15 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 	case "SHA":
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
 		cipherDef.Spec.HashSize = 20
-		cipherDef.Spec.HashAlgorithmIdentifier = HashAlgorithmNumberSha1
+		cipherDef.Spec.ExtHashAlgorithmIdentifier = HashAlgorithmNumberSha1
 	case "MD5":
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmMD5
-		cipherDef.Spec.HashAlgorithmIdentifier = HashAlgorithmNumberMd5
+		cipherDef.Spec.ExtHashAlgorithmIdentifier = HashAlgorithmNumberMd5
 		cipherDef.Spec.HashSize = 16
 	case "SHA256":
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA256
 		cipherDef.Spec.HashSize = 32
-		cipherDef.Spec.HashAlgorithmIdentifier = HashAlgorithmNumberSha256
+		cipherDef.Spec.ExtHashAlgorithmIdentifier = HashAlgorithmNumberSha256
 	default:
 		fmt.Printf("\n hashing method not implemented: %v", hashingMethod)
 		os.Exit(1)
@@ -752,25 +756,87 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 
 	switch singinAlgorithm {
 	case "DSS":
-		// 	  Because DSA signatures do not contain any secure indication of hash
-		//    algorithm, there is a risk of hash substitution if multiple hashes
-		//    may be used with any key.  Currently, DSA [DSS] may only be used with
-		//    SHA-1.  Future revisions of DSS [DSS-3] are expected to allow the use
-		//    of other digest algorithms with DSA.
-		cipherDef.Spec.HashAlgorithmIdentifier = HashAlgorithmNumberSha1
-
 		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmDSA
-		cipherDef.Spec.SignatureAlgorithmIdentifier = SignatureAlgorithmNumberDsa
+		cipherDef.Spec.ExtSignatureAlgorithmIdentifier = SignatureAlgorithmNumberDsa
 	case "RSA":
 		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmRSA
-		cipherDef.Spec.SignatureAlgorithmIdentifier = SignatureAlgorithmNumberRsa
+		cipherDef.Spec.ExtSignatureAlgorithmIdentifier = SignatureAlgorithmNumberRsa
 	case "anon":
 		cipherDef.Spec.SignatureAlgorithm = SignatureAlgorithmAnonymous
-		cipherDef.Spec.SignatureAlgorithmIdentifier = SignatureAlgorithmNumberAnonymous
+		cipherDef.Spec.ExtSignatureAlgorithmIdentifier = SignatureAlgorithmNumberAnonymous
 	default:
 		fmt.Printf("\n singinAlgorithm not implemented: %v", singinAlgorithm)
 		os.Exit(1)
 	}
+
+	// If the client does not send the signature_algorithms extension, the
+	// server MUST do the following:
+
+	// -  If the negotiated key exchange algorithm is one of (RSA, DHE_RSA,
+	//    DH_RSA, RSA_PSK, ECDH_RSA, ECDHE_RSA), behave as if client had
+	//    sent the value {sha1,rsa}.
+
+	// -  If the negotiated key exchange algorithm is one of (DHE_DSS,
+	//    DH_DSS), behave as if the client had sent the value {sha1,dsa}.
+
+	// -  If the negotiated key exchange algorithm is one of (ECDH_ECDSA,
+	//    ECDHE_ECDSA), behave as if the client had sent value {sha1,ecdsa}.
+
+	// Default hashAlgorithmvalue for Signature Algorithms extenstion type 13, signature algorithm is implemented in "switch singinAlgorithm"
+
+	cipherDef.Spec.ExtHashAlgorithmIdentifier = HashAlgorithmNumberSha1
+
+	return nil
+}
+
+func findMax(arr []byte) byte {
+	if len(arr) == 0 {
+		panic("Array passed to findMax is empty")
+	}
+
+	max := arr[0]
+	for _, value := range arr {
+		if value > max {
+			max = value
+		}
+	}
+	return max
+}
+
+func (cipherDef *CipherDef) ExtSetSignatureAlgorithms(data []byte) error {
+	if len(data)%2 != 0 {
+		return fmt.Errorf("data length should be an odd value, as its key pair: hash algorithm, signature")
+	}
+
+	// 	  Because DSA signatures do not contain any secure indication of hash
+	//    algorithm, there is a risk of hash substitution if multiple hashes
+	//    may be used with any key.  Currently, DSA [DSS] may only be used with
+	//    SHA-1.  Future revisions of DSS [DSS-3] are expected to allow the use
+	//    of other digest algorithms with DSA.
+
+	if cipherDef.Spec.SignatureAlgorithm == SignatureAlgorithmDSA {
+		cipherDef.Spec.ExtHashAlgorithmIdentifier = HashAlgorithmNumberSha1
+		return nil
+	}
+
+	singnaturesHashMap := make(map[byte][]byte)
+	for i := 0; i < len(data); i += 2 {
+		hashAlgorithm := data[i]
+		signatureAlgorithm := data[i+1]
+		newVal := singnaturesHashMap[signatureAlgorithm]
+		newVal = append(newVal, hashAlgorithm)
+		singnaturesHashMap[signatureAlgorithm] = newVal
+	}
+
+	hashAvailable := singnaturesHashMap[byte(cipherDef.Spec.ExtHashAlgorithmIdentifier)]
+
+	if len(hashAvailable) == 0 {
+		return fmt.Errorf("no hash algorithms available for singature: %v", cipherDef.Spec.ExtHashAlgorithmIdentifier)
+	}
+
+	maxValue := findMax(hashAvailable)
+
+	cipherDef.Spec.ExtHashAlgorithmIdentifier = HashAlgorithmIdentifier(maxValue)
 
 	return nil
 }

@@ -15,7 +15,7 @@ func (serverData *ServerData) Parser(clientHello []byte) (output [][]byte, rest 
 		}
 
 		contentType := clientHello[0]
-		if contentType < byte(ContentTypeChangeCipherSpec) || contentType > byte(ContentTypeApplicationData) {
+		if contentType < byte(ContentTypeChangeCipherSpec) || contentType > byte(ContentTypeHeartBeat) {
 			return output, rest, fmt.Errorf("invalid content type, content type: %v", contentType)
 		}
 

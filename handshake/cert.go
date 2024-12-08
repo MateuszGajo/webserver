@@ -129,8 +129,6 @@ func parseDHParams(dhKeyBytes []byte) (*DhParams, error) {
 		return nil, fmt.Errorf("failed to unmarshal DH parameters: %v", err)
 	}
 
-	fmt.Printf("\n %+v", privateKeyStructure)
-
 	var private *big.Int
 
 	_, err = asn1.Unmarshal(privateKeyStructure.PrivateKey, &private)
@@ -201,8 +199,6 @@ func (serverData *ServerData) parseCertificate(certFile, keyFile string) ([]byte
 			serverData.CipherDef.Rsa.LengthRecord = true
 		}
 	} else if cert.PublicKeyAlgorithm == x509.UnknownPublicKeyAlgorithm {
-		fmt.Printf("\n %+v", cert)
-		// fmt.Println(cert)
 
 		dhParams, err := parseDHParams(keyBlockBytes)
 		if err != nil {

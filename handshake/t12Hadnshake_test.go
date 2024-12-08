@@ -95,8 +95,6 @@ func TestHandshakeOpenT12_DH_RSA_AES128_SHA256(t *testing.T) {
 func TestHandshakeOpenT12_DH_RSA_AES256_SHA256(t *testing.T) {
 	params := generateRsaDHCert()
 
-	fmt.Println(params)
-
 	server := startServer(params, TLS12Version)
 	defer StopServer(*server)
 
@@ -107,8 +105,6 @@ func TestHandshakeOpenT12_DH_RSA_AES256_SHA256(t *testing.T) {
 
 func TestHandshakeOpenT12_DHE_DSS_AES256_SHA256(t *testing.T) {
 	params := generateDSsCert()
-
-	fmt.Println(params)
 
 	server := startServer(params, TLS12Version)
 	defer StopServer(*server)
@@ -121,8 +117,6 @@ func TestHandshakeOpenT12_DHE_DSS_AES256_SHA256(t *testing.T) {
 func TestHandshakeOpenT12_DHE_DSS_AES256_SHA(t *testing.T) {
 	params := generateDSsCert()
 
-	fmt.Println(params)
-
 	server := startServer(params, TLS12Version)
 	defer StopServer(*server)
 
@@ -133,8 +127,6 @@ func TestHandshakeOpenT12_DHE_DSS_AES256_SHA(t *testing.T) {
 
 func TestHandshakeOpenT12_DH_DSS_AES256_SHA256(t *testing.T) {
 	params := generateDssDHCert()
-
-	fmt.Println(params)
 
 	server := startServer(params, TLS12Version)
 	defer StopServer(*server)

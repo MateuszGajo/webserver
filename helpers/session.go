@@ -1,4 +1,4 @@
-package handshake
+package helpers
 
 // One way of generating random numbers:
 // LCG linear congruential generator - x_(n+1) = (aX_(n) +C) mod m

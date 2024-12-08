@@ -6,22 +6,12 @@ import (
 	"fmt"
 )
 
-
 func DecryptAES(key, iv, ciphertext []byte) ([]byte, error) {
-	fmt.Println("phase one")
-	fmt.Println("key")
-	fmt.Println(key)
 	block, err := aes.NewCipher(key)
-	if err != nil { 
-		return nil, err 
+	if err != nil {
+		return nil, err
 	}
 
-	fmt.Println("phase two") 
-	fmt.Println("ciphertext")
-	fmt.Println(len(ciphertext))
-	fmt.Println(ciphertext)
- 
-	
 	if len(ciphertext)%block.BlockSize() != 0 {
 		return nil, fmt.Errorf("ciphertext should be multiplier of block size")
 	}
@@ -57,7 +47,6 @@ func DecryptAESMessage(encryptedData, writeKey, iv []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("problem decrypting data: %v", err)
 	}
-	fmt.Println("decoded msg", decodedMsg)
 
 	decodedMsgWithoutPadding, err := removeCustomPadding(decodedMsg, len(encryptedData))
 	if err != nil {
@@ -80,4 +69,3 @@ func (cipherDef *CipherDef) EncryptAESMessage(data, writeKey, iv []byte) ([]byte
 
 	return encryptedMsg, nil
 }
-

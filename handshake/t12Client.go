@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"fmt"
 	"hash"
 
@@ -18,30 +19,32 @@ func (serverData *ServerData) T12GetServerKeyExchangeMessage() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("key exchange params")
-	fmt.Println(keyExchangeParams)
+
 	hash := []byte{}
-	// TODO: change this function
+
+	var hashAlgorithm = sha1.New()
+
+	switch serverData.CipherDef.Spec.ExtHashAlgorithmIdentifier {
+	case cipher.HashAlgorithmNumberNone:
+		return nil, fmt.Errorf("key exchange should be hashed, we got value none hash algorithm")
+	case cipher.HashAlgorithmNumberMd5:
+		hashAlgorithm = md5.New()
+	case cipher.HashAlgorithmNumberSha1:
+		hashAlgorithm = sha1.New()
+	case cipher.HashAlgorithmNumberSha224:
+		hashAlgorithm = sha256.New224()
+	case cipher.HashAlgorithmNumberSha256:
+		hashAlgorithm = sha256.New()
+	case cipher.HashAlgorithmNumberSha384:
+		hashAlgorithm = sha512.New384()
+	case cipher.HashAlgorithmNumberSha512:
+		hashAlgorithm = sha512.New()
+	default:
+		return nil, fmt.Errorf("hash algorithm not implemented in keyExchange, trying to use: %v", serverData.CipherDef.Spec.ExtHashAlgorithmIdentifier)
+	}
 	switch serverData.CipherDef.Spec.SignatureAlgorithm {
 	case cipher.SignatureAlgorithmAnonymous:
-	case cipher.SignatureAlgorithmRSA:
-		var hashAlgorithm = sha1.New()
-		switch serverData.CipherDef.Spec.HashAlgorithm {
-		case cipher.HashAlgorithmSHA256:
-			hashAlgorithm = sha256.New()
-		}
-		hash = signatureHash(hashAlgorithm, serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
-		// hash = append(hash, md5Hash...)
-		// hash = append(hash, shaHash...)
-		fmt.Println("key exchange params rsa")
-	//hash = append(hash, serverData.ClientRandom...)
-	//	hash = append(hash, serverData.ServerRandom...)
-	//	hash = append(hash, keyExchangeParams...)
-
-	case cipher.SignatureAlgorithmDSA:
-		// DSA supports only sha1
-		var hashAlgorithm = sha1.New()
-
+	case cipher.SignatureAlgorithmRSA, cipher.SignatureAlgorithmDSA:
 		hash = signatureHash(hashAlgorithm, serverData.ClientRandom, serverData.ServerRandom, keyExchangeParams)
 	default:
 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
@@ -58,11 +61,10 @@ func (serverData *ServerData) T12GetServerKeyExchangeMessage() ([]byte, error) {
 
 	keyExchangeData := []byte{}
 	keyExchangeData = append(keyExchangeData, keyExchangeParams...)
-	// SignatureAndHashAlgorithm, what the fuck, we have signature and hash algorithm, not not really specified, actually there is describe in 4.7.  Cryptographic Attributes :))))
 
 	if len(signedParams) > 0 {
-		keyExchangeData = append(keyExchangeData, byte(serverData.CipherDef.Spec.HashAlgorithmIdentifier))
-		keyExchangeData = append(keyExchangeData, byte(serverData.CipherDef.Spec.SignatureAlgorithmIdentifier))
+		keyExchangeData = append(keyExchangeData, byte(serverData.CipherDef.Spec.ExtHashAlgorithmIdentifier))
+		keyExchangeData = append(keyExchangeData, byte(serverData.CipherDef.Spec.ExtSignatureAlgorithmIdentifier))
 
 		keyExchangeData = append(keyExchangeData, signatureLength...)
 		keyExchangeData = append(keyExchangeData, signedParams...)

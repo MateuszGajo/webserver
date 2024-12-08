@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"hash"
-	"net"
 	"os"
 	"reflect"
 	"sync"
@@ -114,6 +113,7 @@ import (
 type ContentType byte
 
 const (
+	ContentTypeHeartBeat        ContentType = 24
 	ContentTypeApplicationData  ContentType = 23
 	ContentTypeHandshake        ContentType = 22
 	ContentTypeAlert            ContentType = 21
@@ -160,8 +160,9 @@ const (
 	AlertDescriptionUnsportedExtension     AlertDescription = 110
 )
 
-const MASTER_SECRET_LENGTH = 48
-const RANDOM_BYTES_LENGTH = 32
+const MasterSecretLength = 48
+const RandomBytesLength = 32
+const ConnectionTimeoutSec = 10
 
 type AlertLevel byte
 
@@ -199,22 +200,19 @@ const (
 	serverSender Sender = 0x53525652
 )
 
-var pad1 = []byte{
-	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
-	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
-	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
-	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
-	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
-	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36}
+type HeartBeatMode byte
 
-// for sha
-var pad2 = []byte{
-	0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
-	0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
-	0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
-	0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
-	0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c,
-	0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c, 0x5c}
+const (
+	HeartBeatPeerAllowedToSendMode    HeartBeatMode = 1
+	HeartBeatPeerNotAllowedToSendMode HeartBeatMode = 2
+)
+
+type HeartBeatMessageType byte
+
+const (
+	HeartBeatMessageTypeRequest  HeartBeatMessageType = 1
+	HeartBeatMessageTypeResponse HeartBeatMessageType = 2
+)
 
 // DES -Data encryption standard, block encryption, symmetric key, not secure anymore, succedor is 3des, and then aes replaced them
 
@@ -227,6 +225,15 @@ type Session struct {
 
 var sessions = Session{
 	data: make(map[string]*ServerData),
+}
+
+func (serverData *ServerData) closeHandshakeConn() {
+	serverData.conn.Close()
+	if serverData.extHeartBeat != nil && serverData.extHeartBeat.quit != nil {
+		serverData.extHeartBeat.once.Do(func() {
+			close(serverData.extHeartBeat.quit)
+		})
+	}
 }
 
 func (serverData *ServerData) sendAlertMsg(level AlertLevel, description AlertDescription) {
@@ -246,7 +253,8 @@ func (serverData *ServerData) sendAlertMsg(level AlertLevel, description AlertDe
 
 }
 
-func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) error {
+func handleMessage(clientData []byte, serverData *ServerData) error {
+
 	contentType := clientData[0]
 	dataContent := clientData[5:]
 	var err error
@@ -282,13 +290,49 @@ func handleMessage(clientData []byte, conn net.Conn, serverData *ServerData) err
 
 	} else if contentType == byte(ContentTypeApplicationData) {
 		HttpHandler(dataContent)
+	} else if contentType == byte(ContentTypeHeartBeat) {
+
+		if err := serverData.handleHeartBeat(dataContent); err != nil {
+			serverData.sendAlertMsg(AlertLevelwarning, AlertDescriptionCloseNotify)
+			return fmt.Errorf("problem while reading hear beat response: %v", err)
+		}
 	} else {
 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 		return fmt.Errorf("\n Unknown record layer type:" + string(contentType))
 	}
 	return err
-
 }
+
+func (serverData *ServerData) handleHeartBeat(dataContent []byte) error {
+	if len(dataContent) < 3 {
+		return fmt.Errorf("data content should have at least 3 bytes, 1 for type, 2 for length")
+	}
+	MinPaddingLength := 16
+
+	dataType := dataContent[0]
+
+	if dataType != byte(HeartBeatMessageTypeResponse) {
+		return fmt.Errorf("expecting heart beat to be of type response")
+	}
+	dataLength := binary.BigEndian.Uint16(dataContent[1:3])
+
+	if len(dataContent) < int(dataLength)+3+MinPaddingLength {
+		return fmt.Errorf("data should be at of length :%v, insted we got: %v", int(dataLength)+3+MinPaddingLength, len(dataContent))
+	}
+
+	msg := dataContent[3 : 3+dataLength]
+
+	if !reflect.DeepEqual(msg, serverData.extHeartBeat.lastPayload) {
+		return fmt.Errorf("heart beat msg content should be the same as in request: %v, insted we got: %v", serverData.extHeartBeat.lastPayload, msg)
+	}
+	fmt.Println("thump-thump ~~ Heart beat ~~ thump-thump")
+
+	currentTime := time.Now()
+	serverData.extHeartBeat.lastAct = &currentTime
+
+	return nil
+}
+
 func (serverData *ServerData) generateStreamCipher(dataCompressedType, sslCompressData, seqNum, mac []byte) []byte {
 	switch binary.BigEndian.Uint16(serverData.Version) {
 	case 0x0300:
@@ -338,9 +382,6 @@ func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) ([
 }
 
 func (serverData *ServerData) handleAlert(contentData []byte) {
-	// majorVersion := clientHello[1]
-	// minorVersion := clientHello[2]
-	// length := clientHello[3:4]
 	alertLevel := AlertLevel(contentData[0])
 	closeConn := false
 
@@ -352,7 +393,7 @@ func (serverData *ServerData) handleAlert(contentData []byte) {
 
 	switch alertDescription {
 	case AlertDescriptionCloseNotify:
-		// The connection is closing or has been closed gracefully, no action needed
+		// The connection is closing or has been closed gracefully
 		fmt.Println("Closing connection")
 		closeConn = true
 	case AlertDescriptionUnexpectedMessage:
@@ -462,7 +503,8 @@ func (serverData *ServerData) handleAlert(contentData []byte) {
 	}
 
 	if closeConn {
-		serverData.conn.Close()
+		fmt.Println("close connection by alert")
+		serverData.closeHandshakeConn()
 		return
 	}
 }
@@ -578,6 +620,54 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 	return nil
 }
 
+func (serverData *ServerData) handleLiveConnection() {
+	if serverData.extHeartBeat == nil {
+		return
+	}
+	ticker := time.NewTicker(3 * time.Second)
+
+	quit := make(chan struct{})
+	serverData.extHeartBeat.quit = quit
+	for {
+		select {
+		case <-ticker.C:
+			if serverData.extHeartBeat.lastAct != nil {
+				differenceSec := (time.Now().UnixMilli() - serverData.extHeartBeat.lastAct.UnixMilli()) / 1000
+
+				if differenceSec > ConnectionTimeoutSec {
+					serverData.closeHandshakeConn()
+				}
+			}
+			heartBeatType := HeartBeatMessageTypeRequest
+			heartBeatContentLength := helpers.Int32ToBigEndian(16)
+			heartBeatContent, err := helpers.GenerateRandomBytes(16)
+			heartBeatPadding := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+			if err != nil {
+				fmt.Printf("problem creating random bytes, :%v", heartBeatContent)
+				return
+			}
+			data := []byte{byte(heartBeatType)}
+			data = append(data, heartBeatContentLength...)
+			data = append(data, heartBeatContent...)
+			data = append(data, heartBeatPadding...)
+
+			serverData.extHeartBeat.lastPayload = heartBeatContent
+
+			serverData.BuffSendData(ContentTypeHeartBeat, data)
+
+			_, err = serverData.sendData(serverData.wBuff)
+
+			if err != nil {
+				serverData.closeHandshakeConn()
+			}
+		case <-quit:
+			ticker.Stop()
+			return
+		}
+	}
+
+}
+
 func (serverData *ServerData) handleHandshake(contentData []byte) error {
 
 	handshakeMessageType := HandshakeMessageType(contentData[0])
@@ -611,22 +701,12 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 			if err = serverData.loadCertificate(); err != nil {
 				return fmt.Errorf("\n problem loading certificate: %V", err)
 			}
-			fmt.Println("`````")
-			fmt.Println("send cert")
 		}
 
-		// The server key exchange message is sent by the server if it has no cetificate, has a certificate used for siging (e.g. dss certificate, signing-only rsa)
-		// if serverData.CipherDef.Spec.SignatureAlgorithm == cipher.SignatureAlgorithmAnonymous || // No certificate
-		// 	serverData.CipherDef.Spec.SignatureAlgorithm == cipher.SignatureAlgorithmDSA || // das certificate
-		// 	(serverData.CipherDef.Spec.SignatureAlgorithm == cipher.SignatureAlgorithmRSA && // signin only
-		// 		(serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH))
-		// I think can simply if to just if the key exchange method is DH
-		// only for EDH ECDH
 		if (serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH && serverData.CipherDef.Spec.KeyExchangeRotation) ||
 			(serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH && serverData.CipherDef.Spec.SignatureAlgorithm == cipher.SignatureAlgorithmAnonymous) {
 			if err = serverData.serverKeyExchange(); err != nil {
 				return fmt.Errorf("\n problem with serverkeyexchange message: %v", err)
-
 			}
 		}
 
@@ -649,6 +729,7 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 		}
 	} else if handshakeMessageType == HandshakeMessageFinished {
 		if serverData.reuseSession {
+			go serverData.handleLiveConnection()
 			return nil
 		}
 
@@ -680,7 +761,7 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 		sessions.mu.Lock()
 		sessions.data[string(serverData.session)] = serverData
 		sessions.mu.Unlock()
-
+		go serverData.handleLiveConnection()
 	}
 	return nil
 }
@@ -775,10 +856,10 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 
 	err = serverData.SelectBlockCipherPadding()
 
-	// if compressionMethodListEndIndex == uint16(len(contentData)) {
-	// No extenstion
-	return err
-	// }
+	if compressionMethodListEndIndex == uint16(len(contentData)) {
+		return err
+	}
+	extension := contentData[compressionMethodListEndIndex:]
 
 	// TODO implement this
 	if compressionMethodListEndIndex+4 > uint16(len(contentData)) {
@@ -786,36 +867,73 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 		return fmt.Errorf("invalid extenstion length, expect to get at least four bytes of extension length, extenstion we got: %v", contentData[compressionMethodListEndIndex:])
 	}
 
-	extension := contentData[compressionMethodListEndIndex:]
+	// extension := contentData[compressionMethodListEndIndex:]
 
-	extensionLength := binary.BigEndian.Uint16(extension[:2])
+	// extensionLength := binary.BigEndian.Uint16(extension[:2])
 	// That is length for all extenstion, we need to do loop here
-	if extensionLength != uint16(len(extension)) {
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionUnsportedExtension)
-		return fmt.Errorf("invalid extension length, expected: %v got: %v", extensionLength, len(extension))
-	}
-	extenionType := binary.BigEndian.Uint16(extension[2:4])
+	extenstionData := extension[2:]
 
-	switch extenionType {
-	case 35:
-		if len(extension) < 6 {
-			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionUnsportedExtension)
-			return fmt.Errorf("invalid extenstion length, expect to get at least six bytes of extension length, extenstion we got: %v", contentData[compressionMethodListEndIndex:])
+	type sslExtension struct {
+		extType uint16
+		extData []byte
+	}
+
+	extenstions := []sslExtension{}
+
+	for len(extenstionData) > 0 {
+		if len(extenstionData) < 4 {
+			return fmt.Errorf("extenstion data should have at least four bytes, 2 for type, 2 for data length, insted we got: %v, with data:%v", len(extenstionData), extenstionData)
 		}
-		// contentLength := binary.BigEndian.Uint16(extension[4:6])
-		// content := extension[6 : 6+contentLength]
+		extenionType := binary.BigEndian.Uint16(extenstionData[0:2])
+		dataLength := binary.BigEndian.Uint16(extenstionData[2:4])
+		if len(extenstionData) < int(4+dataLength) {
+			return fmt.Errorf("expected to data have length of %v, insted we got:%v, data: %v", dataLength, len(extenstionData)-4, extenstionData[4:])
+		}
+		data := extenstionData[4 : 4+dataLength]
 
-	default:
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionUnsportedExtension)
-		return fmt.Errorf("unsupported extenstion type: %v", extenionType)
+		extData := sslExtension{
+			extType: extenionType,
+			extData: data,
+		}
+		extenstions = append(extenstions, extData)
+		extenstionData = extenstionData[4+dataLength:]
 	}
 
-	// the rest bytes are extenstion
+	for _, v := range extenstions {
+		dataType := v.extType
+		data := v.extData
+		switch dataType {
+		case 13:
+			if len(data) < 2 {
+				return fmt.Errorf("signature algorithm should have at least two bytes for length, we got: %v", data)
+			}
+			length := binary.BigEndian.Uint16(data[:2])
+			if len(data) < 2+int(length) {
+				return fmt.Errorf("expected data to be of length: %v, insted we got:%v, with data: %v", length, len(data)-2, data)
+			}
 
-	// if sessionIndexEnd+2+cipherSuitesLength+1+uint16(compressionsLength) != uint16(len(contentData)) {
-	// 	serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
-	// 	return fmt.Errorf("\n Some bytes are lft:%v, expected :%v", len(compressionMethodList), int(compressionsLength))
-	// }
+			serverData.CipherDef.ExtSetSignatureAlgorithms(data[2:])
+		case 15:
+			if len(data) < 1 {
+				return fmt.Errorf("heart beat should have a length of 1 byte we got: %v", data)
+			}
+
+			if HeartBeatMode(data[0]) != HeartBeatPeerAllowedToSendMode && HeartBeatMode(data[0]) != HeartBeatPeerNotAllowedToSendMode {
+				serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionIllegalParameter)
+				return fmt.Errorf("heart beat should have value of: %v, %v", HeartBeatPeerAllowedToSendMode, HeartBeatPeerNotAllowedToSendMode)
+			}
+			if HeartBeatMode(data[0]) == HeartBeatPeerAllowedToSendMode {
+				serverData.extHeartBeat = &ExtHeartBeat{}
+			}
+		case 35:
+			// TODO: implement
+			// Sessioc ticket
+			// https://www.rfc-editor.org/rfc/rfc5077.html
+			// https://www.rfc-editor.org/rfc/rfc8447.html
+		default:
+			return fmt.Errorf("unknown extenstion type: %v", dataType)
+		}
+	}
 
 	return err
 }
@@ -859,9 +977,6 @@ func (serverData *ServerData) serverKeyExchange() error {
 	serverKeyExchange = append(serverKeyExchange, handshakeLengthByte...)
 	serverKeyExchange = append(serverKeyExchange, keyExchangeData...)
 
-	fmt.Println("key exchange msg")
-	fmt.Println(serverKeyExchange)
-
 	err = serverData.BuffSendData(ContentTypeHandshake, serverKeyExchange)
 
 	return err
@@ -873,7 +988,7 @@ func (serverData *ServerData) serverHello() error {
 	unixTime := currentTime.Unix()
 
 	unitTimeBytes := helpers.Int64ToBIgEndian(unixTime)
-	randomBytes := make([]byte, RANDOM_BYTES_LENGTH-len(unitTimeBytes))
+	randomBytes := make([]byte, RandomBytesLength-len(unitTimeBytes))
 
 	_, err := rand.Read(randomBytes)
 
@@ -893,7 +1008,7 @@ func (serverData *ServerData) serverHello() error {
 		session = serverData.session
 		sessionLength = []byte{byte(len(session))}
 	} else {
-		session = GenerateSession()
+		session = helpers.GenerateSession()
 
 		sessionLength = []byte{byte(len(session))}
 		serverData.session = session
@@ -960,7 +1075,7 @@ func (serverData *ServerData) handleHandshakeClientKeyExchange(contentData []byt
 	if label == nil && binary.BigEndian.Uint16(serverData.Version) >= 0x301 {
 		return fmt.Errorf("every version from tls1.0 should use label for calculate master key")
 	}
-	masterKey := serverData.prf(preMasterSecret, masterKeySeed, label, MASTER_SECRET_LENGTH)
+	masterKey := serverData.prf(preMasterSecret, masterKeySeed, label, MasterSecretLength)
 
 	err = serverData.calculateKeyBlock(masterKey)
 
@@ -990,7 +1105,6 @@ func (serverData *ServerData) prf(key, seed, label []byte, length int) []byte {
 	case 0x0301, 0x0302:
 		return T1Prf(key, seedExtended, length)
 	case 0x0303:
-		fmt.Println("make sure we're using right prf function, t12")
 		return T12Prf(key, seedExtended, length)
 	default:
 		fmt.Println("should never enter this state in prf")
@@ -1023,8 +1137,6 @@ func (serverData *ServerData) calculateKeyBlock(masterKey []byte) error {
 		return fmt.Errorf("every version from tls1.0 should use label for calculate key block")
 	}
 	keyBlock := serverData.prf(masterKey, keyBlockSeed, label, keyBlockLen)
-	fmt.Println("master key")
-	fmt.Println(masterKey)
 
 	macEndIndex := serverData.CipherDef.Spec.HashSize * 2
 	writeKeyEndIndex := macEndIndex + serverData.CipherDef.Spec.KeyMaterial*2
@@ -1141,9 +1253,6 @@ func (serverData *ServerData) handleHandshakeClientFinished(contentData []byte) 
 
 func (serverData *ServerData) handleHandshakeChangeCipherSpec(contentData []byte) {
 	serverData.ClientSeqNum = []byte{0, 0, 0, 0, 0, 0, 0, 0}
-	message := CipherSpec(contentData[0])
-	if message == CipherSpecDefault {
-		fmt.Print("Sender is switching to new cipher")
-	}
+
 	serverData.IsClientEncrypted = true
 }

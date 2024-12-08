@@ -25,6 +25,13 @@ type HttpServerCertParam struct {
 	KeyPath  string
 }
 
+type ExtHeartBeat struct {
+	quit        chan struct{}
+	once        sync.Once
+	lastAct     *time.Time
+	lastPayload []byte
+}
+
 type ServerData struct {
 	IsClientEncrypted bool
 	IsServerEncrypted bool
@@ -42,6 +49,7 @@ type ServerData struct {
 	cert              []byte
 	session           []byte
 	reuseSession      bool
+	extHeartBeat      *ExtHeartBeat
 }
 
 type HttpServerOptions func(s *HttpServer)
@@ -150,7 +158,7 @@ func (httpServer *HttpServer) CloseHttpServer() {
 }
 
 func (httpServer *HttpServer) handleConnection(conn net.Conn, serverData *ServerData) {
-	defer conn.Close()
+	defer serverData.closeHandshakeConn()
 
 	bufInit := []byte{}
 
@@ -183,11 +191,10 @@ Loop:
 			if err != nil {
 				fmt.Printf("\n parser error: %v", err)
 				serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
-
 			}
 
 			for _, msg := range msgs {
-				err := handleMessage(msg, conn, serverData)
+				err := handleMessage(msg, serverData)
 				if err != nil {
 					fmt.Println(err)
 					break Loop
