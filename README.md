@@ -69,6 +69,10 @@ Project supports following ciphers of tls1.2:
 * DH-DSS-AES256-SHA256
 * DHE-DSS-AES256-SHA256
 * DHE-DSS-AES256-SHA
+* AES256-SHA256
+* AES256-SHA
+* AES128-SHA256
+* AES128-SHA
 
 ## Supported features
 * session resumption
