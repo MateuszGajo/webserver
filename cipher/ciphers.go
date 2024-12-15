@@ -3,10 +3,8 @@ package cipher
 import (
 	"bytes"
 	"crypto"
-	"crypto/cipher"
 	"crypto/dsa"
 	"crypto/rand"
-	"crypto/rc4"
 	"crypto/rsa"
 	"encoding/asn1"
 	"encoding/binary"
@@ -33,6 +31,7 @@ type HashAlgorithm string
 const (
 	HashAlgorithmSHA    HashAlgorithm = "SHA"
 	HashAlgorithmSHA256 HashAlgorithm = "SHA256"
+	HashAlgorithmSHA384 HashAlgorithm = "SHA384"
 	HashAlgorithmMD5    HashAlgorithm = "MD5"
 )
 
@@ -118,19 +117,7 @@ type CipherDef struct {
 	DhParams           DhParams
 	Rsa                RsaCipher
 	Dsa                DsaCipher
-	Rc4                RC4Cipher
-	Rc2                RC2Cipherr
 	PreferServerCipher bool
-}
-
-type RC4Cipher struct {
-	EncryptCipher *rc4.Cipher
-	DecryptCipher *rc4.Cipher
-}
-
-type RC2Cipherr struct {
-	EncryptCipher *cipher.Block
-	DecryptCipher *cipher.Block
 }
 
 type RsaCipher struct {
@@ -149,7 +136,16 @@ type DhParams struct {
 	Private      *big.Int
 	Public       *big.Int
 	ClientPublic *big.Int
+	Group        *DHGroups
 }
+
+type DHGroups byte
+
+const (
+	// https://www.rfc-editor.org/rfc/rfc7919.html
+	// TLS1.3 TODO fill them
+	DhGroupX25519 DHGroups = 0x001D
+)
 
 type CompressionMethod byte
 
@@ -165,9 +161,6 @@ const (
 	CIPHER_SUITE_SSL_NULL_WITH_NULL_NULL            TLSCipherSuite = 0x0000
 	CIPHER_SUITE_SSL_RSA_WITH_NULL_MD5              TLSCipherSuite = 0x0001
 	CIPHER_SUITE_SSL_RSA_WITH_NULL_SHA              TLSCipherSuite = 0x0002
-	CIPHER_SUITE_SSL_RSA_EXPORT_WITH_RC4_40_MD5     TLSCipherSuite = 0x0003
-	CIPHER_SUITE_SSL_RSA_WITH_RC4_128_MD5           TLSCipherSuite = 0x0004
-	CIPHER_SUITE_SSL_RSA_WITH_RC4_128_SHA           TLSCipherSuite = 0x0005
 	CIPHER_SUITE_SSL_RSA_EXPORT_WITH_RC2_CBC_40_MD5 TLSCipherSuite = 0x0006
 	CIPHER_SUITE_SSL_RSA_WITH_IDEA_CBC_SHA          TLSCipherSuite = 0x0007
 	CIPHER_SUITE_SSL_RSA_EXPORT_WITH_DES40_CBC_SHA  TLSCipherSuite = 0x0008
@@ -203,7 +196,6 @@ const (
 	// dhe denothes ephemral diffie-hellman where dh paramters are signed by dss or rsa cerificate, which has been signed by ca. The sigin algorithm used in specified after the dh or dhepparamter.
 	// In all case  the clie must have the same type of cerificate, and must use the dh paramters chosen by the server
 
-	CIPHER_SUITE_SSL_DH_anon_WITH_RC4_128_MD5        TLSCipherSuite = 0x0018
 	CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA   TLSCipherSuite = 0x001B
 	CIPHER_SUITE_SSL_DH_anon_WITH_AES_128_CBC_SHA    TLSCipherSuite = 0x0034
 	CIPHER_SUITE_SSL_DH_anon_WITH_AES_256_CBC_SHA    TLSCipherSuite = 0x003A
@@ -212,9 +204,15 @@ const (
 	// The following cipher suited are used for completely anonymous diffie hellman in which neither party is authenticated. Note thi is extremly vuluberable to man in the middle attackers, so its strongly discouraged to use it.
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_NULL_SHA         TLSCipherSuite = 0x001C
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA TLSCipherSuite = 0x001D
-	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_RC4_128_SHA      TLSCipherSuite = 0x001E
 	// fortezza tokens used in the highly secure env such as goverment
 	//
+
+	// TLS 1.3 ciphers
+	CIPHER_SUITE_SSL_AES_128_GCM_SHA256       TLSCipherSuite = 0x1301
+	CIPHER_SUITE_SSL_AES_256_GCM_SHA384       TLSCipherSuite = 0x1302
+	CIPHER_SUITE_SSL_CHACHA20_POLY1305_SHA256 TLSCipherSuite = 0x1303
+	CIPHER_SUITE_SSL_AES_128_CCM_SHA256       TLSCipherSuite = 0x1304
+	CIPHER_SUITE_SSL_AES_128_CCM_8_SHA256     TLSCipherSuite = 0x1305
 )
 
 // Export Ciphers: These ciphers were created to comply with U.S. regulations. As a result, export ciphers used reduced-strength encryption (e.g., 40-bit DES) and short (512-bit) RSA keys.
@@ -224,9 +222,6 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 	CIPHER_SUITE_SSL_NULL_WITH_NULL_NULL:            "NULL_NULL_WITH_NULL_NULL_NULL",
 	CIPHER_SUITE_SSL_RSA_WITH_NULL_MD5:              "RSA_RSA_WITH_NULL_NULL_MD5",
 	CIPHER_SUITE_SSL_RSA_WITH_NULL_SHA:              "RSA_RSA_WITH_NULL_NULL_SHA",
-	CIPHER_SUITE_SSL_RSA_EXPORT_WITH_RC4_40_MD5:     "RSA_RSA_EXPORT_RC4_40_MD5",
-	CIPHER_SUITE_SSL_RSA_WITH_RC4_128_MD5:           "RSA_RSA_WITH_RC4_128_MD5",
-	CIPHER_SUITE_SSL_RSA_WITH_RC4_128_SHA:           "RSA_RSA_WITH_RC4_128_SHA",
 	CIPHER_SUITE_SSL_RSA_EXPORT_WITH_RC2_CBC_40_MD5: "RSA_RSA_EXPORT_RC2_CBC-40_MD5",
 	CIPHER_SUITE_SSL_RSA_WITH_IDEA_CBC_SHA:          "RSA_RSA_WITH_IDEA_CBC_SHA",
 	CIPHER_SUITE_SSL_RSA_EXPORT_WITH_DES40_CBC_SHA:  "RSA_RSA_EXPORT_DES40_CBC_SHA",
@@ -261,7 +256,6 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 	// Folowing cipher suited are used for server-authenticated (optianlly client) diffie-hellman. Dh denotes cipher suited in which the server-s certificate contains dh paramters signed by the  certificate authority.
 	// dhe denothes ephemral diffie-hellman where dh paramters are signed by dss or rsa cerificate, which has been signed by ca. The sigin algorithm used in specified after the dh or dhepparamter.
 	// In all case  the clie must have the same type of cerificate, and must use the dh paramters chosen by the server
-	CIPHER_SUITE_SSL_DH_anon_WITH_RC4_128_MD5:        "DH_anon_WITH_RC4_128_MD5",
 	CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA:   "DH_anon_WITH_3DES_EDE-CBC_SHA",
 	CIPHER_SUITE_SSL_DH_anon_WITH_AES_128_CBC_SHA:    "DH_anon_WITH_AES_128-CBC_SHA",
 	CIPHER_SUITE_SSL_DH_anon_WITH_AES_128_CBC_SHA256: "DH_anon_WITH_AES_128-CBC_SHA256",
@@ -270,7 +264,10 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 	// The following cipher suited are used for completely anonymous diffie hellman in which neither party is authenticated. Note thi is extremly vuluberable to man in the middle attackers, so its strongly discouraged to use it.
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_NULL_SHA:         "FORTEZZA_FORTEZZA_KEA_WITH_NULL_SHA",
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA: "FORTEZZA_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA",
-	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_RC4_128_SHA:      "FORTEZZA_FORTEZZA_KEA_WITH_RC4_128_SHA",
+
+	// TLS 1.3
+	CIPHER_SUITE_SSL_AES_128_GCM_SHA256: "DH_anon_WITH_AES_128-GCM_SHA256",
+	CIPHER_SUITE_SSL_AES_256_GCM_SHA384: "DH_anon_WITH_AES_256-GCM_SHA384",
 }
 
 func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []byte) ([]byte, error) {
@@ -287,10 +284,6 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []
 		decryptedData, err = DecryptDesMessage(encryptedData, writeKey, iv)
 	case EncryptionAlgorithmDES40:
 		decryptedData, err = DecryptDesMessage(encryptedData, writeKey, iv)
-	case EncryptionAlgorithmRC4:
-		decryptedData, err = cipherDef.DecryptRC4(encryptedData, writeKey)
-	case EncryptionAlgorithmRC2:
-		decryptedData, err = cipherDef.DecryptRC2(encryptedData, writeKey, iv)
 	case EncryptionAlgorithmAES:
 		decryptedData, err = DecryptAESMessage(encryptedData, writeKey, iv)
 	default:
@@ -324,10 +317,6 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) ([]
 		encryptedMsg, err = cipherDef.EncryptDesMessage(data, writeKey, iv)
 	case EncryptionAlgorithmDES40:
 		encryptedMsg, err = cipherDef.EncryptDesMessage(data, writeKey, iv)
-	case EncryptionAlgorithmRC4:
-		encryptedMsg, err = cipherDef.EncryptRC4(data, writeKey)
-	case EncryptionAlgorithmRC2:
-		encryptedMsg, err = cipherDef.EncryptRC2(data, writeKey, iv)
 	case EncryptionAlgorithmAES:
 		encryptedMsg, err = cipherDef.EncryptAESMessage(data, writeKey, iv)
 	default:
@@ -512,8 +501,9 @@ func (cipherDef *CipherDef) VerifySignedData(hash, signature []byte) error {
 // https://www.baeldung.com/cs/des-vs-3des-vs-blowfish-vs-aes according to this source where 3des was broken in 800, for aes we need >13 bilion years.
 // TODO: update list
 var serverCipherPreferences = []TLSCipherSuite{
+	CIPHER_SUITE_SSL_AES_256_GCM_SHA384,
+	CIPHER_SUITE_SSL_AES_128_GCM_SHA256,
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA,
-	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_RC4_128_SHA,
 	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_256_CBC_SHA256,
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_256_CBC_SHA256,
 	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_256_CBC_SHA,
@@ -533,14 +523,11 @@ var serverCipherPreferences = []TLSCipherSuite{
 	CIPHER_SUITE_SSL_DH_RSA_WITH_3DES_EDE_CBC_SHA,
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA,
 	CIPHER_SUITE_SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA,
-	CIPHER_SUITE_SSL_RSA_WITH_RC4_128_MD5,
-	CIPHER_SUITE_SSL_RSA_WITH_RC4_128_SHA,
 	CIPHER_SUITE_SSL_RSA_WITH_DES_CBC_SHA,
 	CIPHER_SUITE_SSL_DHE_DSS_WITH_DES_CBC_SHA,
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_DES_CBC_SHA,
 	CIPHER_SUITE_SSL_DH_DSS_WITH_DES_CBC_SHA,
 	CIPHER_SUITE_SSL_DH_RSA_WITH_DES_CBC_SHA,
-	CIPHER_SUITE_SSL_RSA_EXPORT_WITH_RC4_40_MD5,
 	CIPHER_SUITE_SSL_RSA_EXPORT_WITH_DES40_CBC_SHA,
 	CIPHER_SUITE_SSL_DHE_DSS_EXPORT_WITH_DES40_CBC_SHA,
 	CIPHER_SUITE_SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA,
@@ -553,7 +540,6 @@ var serverCipherPreferences = []TLSCipherSuite{
 	CIPHER_SUITE_SSL_DH_anon_WITH_AES_256_CBC_SHA,
 	CIPHER_SUITE_SSL_DH_anon_WITH_AES_128_CBC_SHA,
 	CIPHER_SUITE_SSL_DH_anon_WITH_3DES_EDE_CBC_SHA,
-	CIPHER_SUITE_SSL_DH_anon_WITH_RC4_128_MD5,
 	CIPHER_SUITE_SSL_RSA_WITH_NULL_SHA,
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_NULL_SHA,
 	CIPHER_SUITE_SSL_RSA_WITH_NULL_MD5,
@@ -709,6 +695,7 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 			cipherDef.Spec.KeyMaterial = 5
 			cipherDef.Spec.ExportKeyMaterial = 16
 		case "256":
+		case "GCM":
 			//backward compability
 		default:
 			fmt.Printf("\n encryption param not implemented %v", param)
@@ -731,6 +718,18 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 		cipherDef.Spec.IvSize = 16
 		cipherDef.Spec.KeyMaterial = 16
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmAES
+	case "AES_128_GCM":
+
+		// TLS1.3: todo
+		cipherDef.Spec.IvSize = 16
+		cipherDef.Spec.KeyMaterial = 16
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmAES
+	case "AES_256_GCM":
+
+		// TLS1.3: todo
+		cipherDef.Spec.IvSize = 16
+		cipherDef.Spec.KeyMaterial = 16
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmAES
 	case "AES_256_CBC":
 		cipherDef.Spec.IvSize = 16
 		cipherDef.Spec.KeyMaterial = 32
@@ -749,6 +748,10 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA256
 		cipherDef.Spec.HashSize = 32
 		cipherDef.Spec.ExtHashAlgorithmIdentifier = HashAlgorithmNumberSha256
+	case "SHA384":
+		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA384
+		cipherDef.Spec.HashSize = 48
+		cipherDef.Spec.ExtHashAlgorithmIdentifier = HashAlgorithmNumberSha384
 	default:
 		fmt.Printf("\n hashing method not implemented: %v", hashingMethod)
 		os.Exit(1)

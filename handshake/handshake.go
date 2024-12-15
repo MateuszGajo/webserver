@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -17,99 +18,35 @@ import (
 
 	"handshakeServer/cipher"
 	"handshakeServer/helpers"
+
+	"github.com/keys-pub/keys"
+	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/hkdf"
 )
 
-// SSL 3.0
+// Client                                           Server
 
-// 1. Fragmentation, block goes int o sslplaintext
-// struct {
-// 		ContentType type;
-// 		ProtocolVersion version;
-// 		uint16 length;
-// 		opaque fragment[SSLPlaintext.length];
-// } SSLPlaintext;
-// } GenericBlockCipher;
-
-// 2. Compression and decompression
-//  struct {
-// 		ContentType type;       /* same as SSLPlaintext.type */
-// 		ProtocolVersion version;/* same as SSLPlaintext.version */
-// 		uint16 length;
-// 		opaque fragment[SSLCompressed.length];
-// } SSLCompressed;
-
-// 3. Integrity of data (mac), intially record is set SSL_NULL_WITH_NULL_NULL, which does not provide any security., but once the handshake is complete, the two partied have shared secrets that are used to encrypt record and compute mac
-// Transform SSLCompressed structure into an SSLCiphertext.
-// struct {
-// 		ContentType type;
-// 		ProtocolVersion version;
-// 		uint16 length;
-// 		select (CipherSpec.cipher_type) {
-// 			case stream: GenericStreamCipher;
-// 			case block: GenericBlockCipher;
-// 		} fragment;
-// 	} SSLCiphertext;
-
-//  stream-ciphered struct {
-// 		opaque content[SSLCompressed.length];
-// 		opaque MAC[CipherSpec.hash_size];
-// } GenericStreamCipher;
-
-// block-ciphered struct {
-// 		opaque content[SSLCompressed.length];
-// 		opaque MAC[CipherSpec.hash_size];
-// 		uint8 padding[GenericBlockCipher.padding_length];
-// 		uint8 padding_length;
-// } GenericBlockCipher;
-// Block cipher required padding to fill the gap e.g we have 1000 bytes and we add 24 bytes to have 1024 bytes block.
-
-//  block ciphers: des, 3des, rc2
-// stream ciphers: rc2
-// We have two StreamCipher and BlockCipher for backward comapbility and flexibility
-
-// Handshake
-
-// Client                                                Server
-//       ClientHello                   -------->
-//                                                        ServerHello
-//                                                       Certificate*
-//                                                 ServerKeyExchange*
-//                                                CertificateRequest*
-//                                     <--------      ServerHelloDone
-//       Certificate*
-//       ClientKeyExchange
-//       CertificateVerify*
-//       [ChangeCipherSpec]
-//       Finished                      -------->
-//                                                 [ChangeCipherSpec]
-//                                     <--------             Finished
-//       Application Data              <------->     Application Data
-
-// First ssl client and server agree on protocol version, select cryptographic algorithms, optionally authenticate each other (sometime client send certificate too), add use public key encryption techniquies to generate  shared secrets.
-// Client send a hello message to which server must respond with server hello or fatal error will occure when connection will fail.
-// Client and server establishes following attribute: Procotol version, sessio id, cipher suite, compression method and additonal two random values are generatd and exchanged, clientHello.random and serverHello.random
-// Following the hello message, server will send its certificatem Additonally, a server key excvhange massage may be sent, if it is required( e.g if their server has no certificate or if its cerificate is for singing only, for certian algorithms like diffie-hellman server maay need provide additional parameters):
-// Signin certificate: oftren used in senceration like code singin, document or digital signatures, where primarly requirement is to verify the identity of signer and the integiry of the signed content, but not really for secure connection, there is not encryption of data nor a pulibc key
-// Then sometime sever may request client cerificate if that is appropriate to the cipher suite selected.
-// Now server send hello message done
-// Client then can send certificate or send notify there is no certificate, then send client key exchange, content of the message will depend on pblic key algorithm selected. IF theclient has sent a certificate with signing ability, a digitally signed cerificate verify message is sent to explicity verify the cerifiacte (client encrypts message with private key, send to the server, server decrypts and cofirms it)
-// client send cofirmation that it will used cipher spect and copy key to current state and start using them
-// Client send finished message under cuureny ciper spec, so handshake its pretty complete
-
-// Resume session
-
-// Client                                       Server
-// ClientHello                   -------->
-// 												ServerHello
-// 												[change cipher spec]
-// 							  	<--------       Finished
-// change cipher spec
-// Finished                      -------->
-// Application Data              <------->     Application Data
-
-// clients send a hello, using session id, server checks its session cache for a match if it found server is willing to re esatblished connection under the specified ssession state, it will send server hello with same sesion id. At this point client and sever need to change cipher spec.
-// If session if is not found, sever generated a new session id and the ssl client and server perform a full handskae.
-
+// Key  ^ ClientHello
+// Exch | + key_share*
+//
+//	| + signature_algorithms*
+//	| + psk_key_exchange_modes*
+//	v + pre_shared_key*       -------->
+//	                                             ServerHello  ^ Key
+//	                                            + key_share*  | Exch
+//	                                       + pre_shared_key*  v
+//	                                   {EncryptedExtensions}  ^  Server
+//	                                   {CertificateRequest*}  v  Params
+//	                                          {Certificate*}  ^
+//	                                    {CertificateVerify*}  | Auth
+//	                                              {Finished}  v
+//	                          <--------  [Application Data*]
+//	^ {Certificate*}
+//
+// Auth | {CertificateVerify*}
+//
+//	v {Finished}              -------->
+//	  [Application Data]      <------->  [Application Data]
 type ContentType byte
 
 const (
@@ -129,6 +66,7 @@ const (
 	TLS10Version Version = 0x0301
 	TLS11Version Version = 0x0302
 	TLS12Version Version = 0x0303
+	TLS13Version Version = 0x0304
 )
 
 type AlertDescription byte
@@ -176,15 +114,16 @@ type HandshakeMessageType byte
 const (
 	HandshakeMessageHelloRequest HandshakeMessageType = 0
 	// server send a request to start new handshake process, allowing session renewals and paramters update
-	HandshakeMessageClientHello       HandshakeMessageType = 1
-	HandshakeMessageServerHello       HandshakeMessageType = 2
-	HandshakeMessageCertificate       HandshakeMessageType = 11
-	HandshakeMessageServerKeyExchange HandshakeMessageType = 12
-	HandshakeMessageCerificateRequest HandshakeMessageType = 13
-	HandshakeMessageServerHelloDone   HandshakeMessageType = 14
-	HandshakeMessageCertificateVerify HandshakeMessageType = 15
-	HandshakeMessageClientKeyExchange HandshakeMessageType = 16
-	HandshakeMessageFinished          HandshakeMessageType = 20
+	HandshakeMessageClientHello        HandshakeMessageType = 1
+	HandshakeMessageServerHello        HandshakeMessageType = 2
+	HandshakeMessageNewSessionTicket   HandshakeMessageType = 4
+	HandshakeMessageEndOfEarlyData     HandshakeMessageType = 5
+	HandshakeMessageEncryptedExtension HandshakeMessageType = 8
+	HandshakeMessageCertificate        HandshakeMessageType = 11
+	HandshakeMessageCertificateVerify  HandshakeMessageType = 15
+	HandshakeMessageFinished           HandshakeMessageType = 20
+	HandshakeMessageKeyUpdate          HandshakeMessageType = 24
+	HandshakeMessageMessageHash        HandshakeMessageType = 254
 )
 
 type CipherSpec byte
@@ -213,6 +152,22 @@ const (
 	HeartBeatMessageTypeRequest  HeartBeatMessageType = 1
 	HeartBeatMessageTypeResponse HeartBeatMessageType = 2
 )
+
+// enum {
+
+// 	/* Elliptic Curve Groups (ECDHE) */
+// 	secp256r1(0x0017), secp384r1(0x0018), secp521r1(0x0019),
+// 	x25519(0x001D), x448(0x001E),
+
+// 	/* Finite Field Groups (DHE) */
+// 	ffdhe2048(0x0100), ffdhe3072(0x0101), ffdhe4096(0x0102),
+// 	ffdhe6144(0x0103), ffdhe8192(0x0104),
+
+// 	/* Reserved Code Points */
+// 	ffdhe_private_use(0x01FC..0x01FF),
+// 	ecdhe_private_use(0xFE00..0xFEFF),
+// 	(0xFFFF)
+// } NamedGroup;
 
 // DES -Data encryption standard, block encryption, symmetric key, not secure anymore, succedor is 3des, and then aes replaced them
 
@@ -543,6 +498,9 @@ func (serverData *ServerData) loadCertificate() error {
 
 func (serverData *ServerData) sendData(data []byte) (n int, err error) {
 
+	fmt.Println("Send data")
+	fmt.Println(data)
+
 	n, err = serverData.conn.Write(data)
 	if err != nil {
 		return 0, fmt.Errorf("error sending data: %v", err)
@@ -611,11 +569,14 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 	} else {
 
 		msg = append(msg, helpers.Int32ToBigEndian(len(data))...)
+		// msg = append(msg, []byte{0, 122}...)
 		msg = append(msg, data...)
 
 	}
 
 	serverData.wBuff = append(serverData.wBuff, msg...)
+	fmt.Println("prepared data to send")
+	fmt.Println(serverData.wBuff)
 
 	return nil
 }
@@ -676,93 +637,96 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 		if err = serverData.handleHandshakeClientHello(contentData); err != nil {
 			return fmt.Errorf("\n Problem handling client hello: %v", err)
 		}
-
 		if err = serverData.serverHello(); err != nil {
 			return fmt.Errorf("\n problem with serverHello msg : %v", err)
 		}
 
-		if serverData.reuseSession {
-			if err = serverData.changeCipher(); err != nil {
-				return fmt.Errorf("problem with change cipher in resuse sesstion, err: %v", err)
-			}
+		// if err = serverData.changeCipher(); err != nil {
+		// 	return fmt.Errorf("problem with change cipher in resuse sesstion, err: %v", err)
+		// }
 
-			if err = serverData.calculateKeyBlock(serverData.MasterKey); err != nil {
-				return fmt.Errorf("\n problem calculating key block, err: %v", err)
-			}
-			if err = serverData.serverFinished(); err != nil {
-				return fmt.Errorf("\n problem with serverFinish msg, err: %v", err)
-			}
-
-			_, err = serverData.sendData(serverData.wBuff)
-			return err
-		}
-
-		if serverData.CipherDef.Spec.SignatureAlgorithm != cipher.SignatureAlgorithmAnonymous {
-			if err = serverData.loadCertificate(); err != nil {
-				return fmt.Errorf("\n problem loading certificate: %V", err)
-			}
-		}
-
-		if (serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH && serverData.CipherDef.Spec.KeyExchangeRotation) ||
-			(serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH && serverData.CipherDef.Spec.SignatureAlgorithm == cipher.SignatureAlgorithmAnonymous) {
-			if err = serverData.serverKeyExchange(); err != nil {
-				return fmt.Errorf("\n problem with serverkeyexchange message: %v", err)
-			}
-		}
-
-		if err = serverData.serverHelloDone(); err != nil {
-			return fmt.Errorf("\n  problem with serverHelloDone message, err: %v", err)
-		}
-
-		// lets do one write with collected few messages, don't send extra network round trips
 		_, err = serverData.sendData(serverData.wBuff)
-		if err != nil {
-			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
-			return fmt.Errorf("\n problem sending server hello data, err: %v", err)
-		}
+		serverData.conn.Write([]byte{20, 3, 3, 0, 1, 1})
+		serverData.conn.Write([]byte{23, 3, 3, 0, 23, 31, 116, 98, 167, 200, 71, 1, 101, 157, 208, 244, 116, 202, 90, 229, 171, 63, 161, 79, 3, 160, 248, 124})
+		return err
 
-	} else if handshakeMessageType == HandshakeMessageClientKeyExchange {
-		// computes ivs, writekeys, macs, don't need to send any message after this
-		if err := serverData.handleHandshakeClientKeyExchange(contentData); err != nil {
-			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
-			return fmt.Errorf("\n handshake client key exchange err: %v", err)
-		}
-	} else if handshakeMessageType == HandshakeMessageFinished {
-		if serverData.reuseSession {
-			go serverData.handleLiveConnection()
-			return nil
-		}
+		// if serverData.reuseSession {
 
-		if err := serverData.handleHandshakeClientFinished(contentData); err != nil {
-			return err
-		}
+		// 	if err = serverData.calculateKeyBlock(serverData.MasterKey); err != nil {
+		// 		return fmt.Errorf("\n problem calculating key block, err: %v", err)
+		// 	}
+		// 	if err = serverData.serverFinished(); err != nil {
+		// 		return fmt.Errorf("\n problem with serverFinish msg, err: %v", err)
+		// 	}
 
-		if err = serverData.changeCipher(); err != nil {
-			return fmt.Errorf("problem with changing cipher, err: %v", err)
-		}
+		// }
 
-		// We don't combine message here to single route trip as change cipher msg is separate content type, in order to not be stalling
-		_, err = serverData.sendData(serverData.wBuff)
-		if err != nil {
-			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
-			return fmt.Errorf("\n problem sending change cipher msg: %v", err)
-		}
+		// if serverData.CipherDef.Spec.SignatureAlgorithm != cipher.SignatureAlgorithmAnonymous {
+		// 	if err = serverData.loadCertificate(); err != nil {
+		// 		return fmt.Errorf("\n problem loading certificate: %V", err)
+		// 	}
+		// }
 
-		err = serverData.serverFinished()
-		if err != nil {
-			return fmt.Errorf("\n problem with serverFinish msg, err: %v", err)
-		}
-		_, err = serverData.sendData(serverData.wBuff)
+		// if (serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH && serverData.CipherDef.Spec.KeyExchangeRotation) ||
+		// 	(serverData.CipherDef.Spec.KeyExchange == cipher.KeyExchangeMethodDH && serverData.CipherDef.Spec.SignatureAlgorithm == cipher.SignatureAlgorithmAnonymous) {
+		// 	if err = serverData.serverKeyExchange(); err != nil {
+		// 		return fmt.Errorf("\n problem with serverkeyexchange message: %v", err)
+		// 	}
+		// }
 
-		if err != nil {
-			serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
-			return fmt.Errorf("\n problem sending server finished msgs: %v", err)
-		}
-		sessions.mu.Lock()
-		sessions.data[string(serverData.session)] = serverData
-		sessions.mu.Unlock()
-		go serverData.handleLiveConnection()
+		// if err = serverData.serverHelloDone(); err != nil {
+		// 	return fmt.Errorf("\n  problem with serverHelloDone message, err: %v", err)
+		// }
+
+		// // lets do one write with collected few messages, don't send extra network round trips
+		// _, err = serverData.sendData(serverData.wBuff)
+		// if err != nil {
+		// 	serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+		// 	return fmt.Errorf("\n problem sending server hello data, err: %v", err)
+		// }
 	}
+	// else if handshakeMessageType == HandshakeMessageClientKeyExchange {
+	// 	// computes ivs, writekeys, macs, don't need to send any message after this
+	// 	if err := serverData.handleHandshakeClientKeyExchange(contentData); err != nil {
+	// 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+	// 		return fmt.Errorf("\n handshake client key exchange err: %v", err)
+	// 	}
+	// } else if handshakeMessageType == HandshakeMessageFinished {
+	// 	if serverData.reuseSession {
+	// 		go serverData.handleLiveConnection()
+	// 		return nil
+	// 	}
+
+	// 	if err := serverData.handleHandshakeClientFinished(contentData); err != nil {
+	// 		return err
+	// 	}
+
+	// 	if err = serverData.changeCipher(); err != nil {
+	// 		return fmt.Errorf("problem with changing cipher, err: %v", err)
+	// 	}
+
+	// 	// We don't combine message here to single route trip as change cipher msg is separate content type, in order to not be stalling
+	// 	_, err = serverData.sendData(serverData.wBuff)
+	// 	if err != nil {
+	// 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+	// 		return fmt.Errorf("\n problem sending change cipher msg: %v", err)
+	// 	}
+
+	// 	err = serverData.serverFinished()
+	// 	if err != nil {
+	// 		return fmt.Errorf("\n problem with serverFinish msg, err: %v", err)
+	// 	}
+	// 	_, err = serverData.sendData(serverData.wBuff)
+
+	// 	if err != nil {
+	// 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+	// 		return fmt.Errorf("\n problem sending server finished msgs: %v", err)
+	// 	}
+	// 	sessions.mu.Lock()
+	// 	sessions.data[string(serverData.session)] = serverData
+	// 	sessions.mu.Unlock()
+	// 	go serverData.handleLiveConnection()
+	// }
 	return nil
 }
 
@@ -781,6 +745,9 @@ func (serverData *ServerData) loadSession(sessionId string) {
 		serverData.session = session.session
 	}
 }
+
+var sessiontmp []byte
+var keyShare []byte
 
 func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) error {
 	contentLength := int(contentData[1])<<16 | int(contentData[2])<<8 | int(contentData[3])
@@ -819,6 +786,9 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 	sessionIndexEnd := uint16(39 + sessionLength)
 	session := contentData[39:sessionIndexEnd]
 
+	fmt.Println("wha we have in session")
+	fmt.Println(session)
+
 	cipherSuitesLength := binary.BigEndian.Uint16(contentData[sessionIndexEnd : sessionIndexEnd+2])
 
 	cipherSuites := contentData[sessionIndexEnd+2 : sessionIndexEnd+2+cipherSuitesLength]
@@ -832,6 +802,8 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 	}
 
 	serverData.loadSession(string(session))
+
+	sessiontmp = session
 
 	serverData.ClientRandom = contentData[6:38]
 	err := serverData.CipherDef.SelectCipherSuite(cipherSuites)
@@ -899,10 +871,46 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 		extenstionData = extenstionData[4+dataLength:]
 	}
 
+	fmt.Println("extensions")
+	fmt.Println(extenstions)
+
 	for _, v := range extenstions {
 		dataType := v.extType
 		data := v.extData
 		switch dataType {
+		case 10:
+			// supported groups
+			if len(data) < 2 {
+				return fmt.Errorf("data should be at least of length: 2, we got data: %v", data)
+			}
+			supportedGroup := cipher.DhGroupX25519
+			groupsLength := binary.BigEndian.Uint16(data[:2])
+
+			if len(data)-2 != int(groupsLength) {
+				return fmt.Errorf("data should be of lenth: %v, insted we got: %v, data: %v", int(groupsLength), len(data)-2, data[2:])
+			}
+			clientGroups := data[2:]
+			if len(clientGroups)%2 != 0 {
+				return fmt.Errorf("client groups data length should be odd, data we got: %v", data[2:])
+			}
+			serverData.CipherDef.DhParams.Group = &supportedGroup
+
+			clientGroupsMap := make(map[uint16]bool)
+
+			for i := 0; i < len(clientGroups); i += 2 {
+				clientGroupsMap[binary.BigEndian.Uint16(clientGroups[i:i+2])] = true
+			}
+
+			fmt.Println("client groups")
+			fmt.Println(clientGroupsMap)
+
+			if !clientGroupsMap[uint16(supportedGroup)] {
+				return fmt.Errorf("Don't support any of the group")
+			}
+
+			fmt.Printf("we can use group: %v", supportedGroup)
+		case 11:
+			// ec points formats
 		case 13:
 			if len(data) < 2 {
 				return fmt.Errorf("signature algorithm should have at least two bytes for length, we got: %v", data)
@@ -925,11 +933,76 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 			if HeartBeatMode(data[0]) == HeartBeatPeerAllowedToSendMode {
 				serverData.extHeartBeat = &ExtHeartBeat{}
 			}
+		case 22:
+			// encrypt_then_mac
+		case 23:
+			// extended_master_secret
+		case 27:
+			// compress_certificate
 		case 35:
 			// TODO: implement
 			// Sessioc ticket
 			// https://www.rfc-editor.org/rfc/rfc5077.html
 			// https://www.rfc-editor.org/rfc/rfc8447.html
+		case 43:
+			// supported_versions
+			if len(data) < 1 {
+				return fmt.Errorf("data should be at least of length: 1, we got data: %v", data)
+			}
+
+			if len(data)-1 != int(data[0]) {
+				return fmt.Errorf("expected the to be of length: %v, got: %v, data: %v", data[0], len(data)-1, data)
+			}
+			supportedVersionData := binary.BigEndian.Uint16(data[1 : 1+data[0]])
+
+			if supportedVersionData != binary.BigEndian.Uint16(serverData.Version) {
+				return fmt.Errorf("expected version to be: %v, got: %v", serverData.Version, data[1:1+data[0]])
+			}
+
+			fmt.Println("supported version")
+			fmt.Println(supportedVersionData)
+		case 45:
+			//psk_key_exchange_modes
+		case 51:
+			//key_share
+
+			// Clients MAY send an empty client_shares vector in order to request
+			//group selection from the server, at the cost of an additional round
+			//trip
+			// This vector MAY be empty if the client is requesting a
+			// HelloRetryRequest.
+
+			if len(data) < 2 {
+				return fmt.Errorf("data should be at least of length: 1, we got data: %v", data)
+			}
+
+			keyShareDataLength := binary.BigEndian.Uint16(data[:2])
+			if len(data)-2 != int(keyShareDataLength) {
+				return fmt.Errorf("data should be of lenth: %v, insted we got: %v, data: %v", int(keyShareDataLength), len(data)-2, data[2:])
+			}
+
+			keyShareData := data[2 : 2+keyShareDataLength]
+
+			if len(keyShareData) < 4 {
+				return fmt.Errorf("key share data  ext should have length of at least 4, 2 for group name, 2 for key exchange length, we got data: %v", keyShareData)
+			}
+
+			groupName := keyShareData[:2]
+			//x25519(0x001D) - 19
+			keyExchangeLength := binary.BigEndian.Uint16(keyShareData[2:4])
+
+			if len(keyShareData)-4 != int(keyExchangeLength) {
+				return fmt.Errorf("key exchange should be of lenth: %v, insted we got: %v, data: %v", int(keyExchangeLength), len(keyShareData)-4, keyShareData[4:])
+			}
+
+			keyExchange := keyShareData[4 : 4+keyExchangeLength]
+
+			fmt.Println("alright, we got groupname")
+			fmt.Println(groupName)
+			fmt.Println("and key exchange")
+			fmt.Println(keyExchange)
+			keyShare = keyExchange
+
 		default:
 			return fmt.Errorf("unknown extenstion type: %v", dataType)
 		}
@@ -959,27 +1032,123 @@ func (serverData *ServerData) getServerKeyExchange() ([]byte, error) {
 	}
 }
 
-func (serverData *ServerData) serverKeyExchange() error {
+// func (serverData *ServerData) serverKeyExchange() error {
 
-	keyExchangeData, err := serverData.getServerKeyExchange()
+// 	keyExchangeData, err := serverData.getServerKeyExchange()
+
+// 	if err != nil {
+// 		return fmt.Errorf("Problem while generating key exchange msg: %v", err)
+// 	}
+// 	handshakeLengthh := len(keyExchangeData)
+// 	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(handshakeLengthh)
+// 	if err != nil {
+// 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+// 		return fmt.Errorf("err while converting to big endian, err: %v", err)
+// 	}
+
+// 	serverKeyExchange := []byte{byte(HandshakeMessageServerKeyExchange)}
+// 	serverKeyExchange = append(serverKeyExchange, handshakeLengthByte...)
+// 	serverKeyExchange = append(serverKeyExchange, keyExchangeData...)
+
+// 	err = serverData.BuffSendData(ContentTypeHandshake, serverKeyExchange)
+
+// 	return err
+// }
+
+// HKDF-Expand-Label(Secret, Label, Context, Length) =
+//             HKDF-Expand(Secret, HkdfLabel, Length)
+
+//        Where HkdfLabel is specified as:
+
+//        struct {
+//            uint16 length = Length;
+//            opaque label<7..255> = "tls13 " + Label;
+//            opaque context<0..255> = Context;
+//        } HkdfLabel;
+
+//        Derive-Secret(Secret, Label, Messages) =
+//             HKDF-Expand-Label(Secret, Label,
+//                               Transcript-Hash(Messages), Hash.length)
+
+func (serverData *ServerData) HKDFExpandLabel(secret, label, context []byte, length int) ([]byte, error) {
+	// TLS 1.3 uses SHA256 for the HMAC function
+	hash := sha1.New
+
+	switch serverData.CipherDef.Spec.HashAlgorithm {
+	case cipher.HashAlgorithmSHA384:
+		hash = sha512.New384
+	default:
+		panic("hash function not implemneted")
+	}
+
+	// Create the HKDF instance
+	combinedLabel := []byte("tls13 ")
+	combinedLabel = append(combinedLabel, label...)
+	lengthByte := helpers.Int32ToBigEndian(length)
+	info := []byte{}
+	info = append(info, lengthByte...)
+	info = append(info, byte(len(combinedLabel)))
+	info = append(info, combinedLabel...)
+	info = append(info, byte(len(context)))
+	info = append(info, context...)
+
+	hkdf1 := hkdf.Expand(hash, secret, info)
+
+	output := make([]byte, length)
+
+	_, err := hkdf1.Read(output)
+	if err != nil {
+		return nil, err
+	}
+
+	return output, nil
+}
+
+func (serverData *ServerData) DeriveSecret(Secret, Label, Messages []byte) ([]byte, error) {
+
+	hashFunc := sha1.New()
+
+	switch serverData.CipherDef.Spec.HashAlgorithm {
+	case cipher.HashAlgorithmSHA384:
+		hashFunc = sha512.New384()
+	default:
+		panic("hash function not implemneted")
+	}
+
+	hashFunc.Write(Messages)
+	res := hashFunc.Sum(nil)
+
+	return serverData.HKDFExpandLabel(Secret, Label, res, serverData.CipherDef.Spec.HashSize)
+}
+
+var serverHelloSecret []byte
+
+func (serverData *ServerData) derive() {
+	hash := sha1.New
+
+	switch serverData.CipherDef.Spec.HashAlgorithm {
+	case cipher.HashAlgorithmSHA384:
+		hash = sha512.New384
+	default:
+		panic("hash function not implemneted")
+	}
+
+	arr := make([]byte, serverData.CipherDef.Spec.HashSize)
+	earlySecret := hkdf.Extract(hash, arr, []byte{})
+
+	aa, err := serverData.DeriveSecret(earlySecret, []byte("derived"), []byte(""))
+
+	handshakeSecret := hkdf.Extract(hash, serverHelloSecret, aa)
 
 	if err != nil {
-		return fmt.Errorf("Problem while generating key exchange msg: %v", err)
-	}
-	handshakeLengthh := len(keyExchangeData)
-	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(handshakeLengthh)
-	if err != nil {
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
-		return fmt.Errorf("err while converting to big endian, err: %v", err)
+		panic(err)
 	}
 
-	serverKeyExchange := []byte{byte(HandshakeMessageServerKeyExchange)}
-	serverKeyExchange = append(serverKeyExchange, handshakeLengthByte...)
-	serverKeyExchange = append(serverKeyExchange, keyExchangeData...)
+	fmt.Println("lets see secret")
+	fmt.Println(aa)
+	fmt.Println("and key")
+	fmt.Println(handshakeSecret)
 
-	err = serverData.BuffSendData(ContentTypeHandshake, serverKeyExchange)
-
-	return err
 }
 
 func (serverData *ServerData) serverHello() error {
@@ -997,56 +1166,136 @@ func (serverData *ServerData) serverHello() error {
 		return fmt.Errorf("problem generating random bytes, err:%v", err)
 	}
 
-	cipherSuite := helpers.Int32ToBigEndian(int(serverData.CipherDef.CipherSuite))
-	compressionMethod := []byte{byte(serverData.CipherDef.Spec.CompressionMethod)}
+	// cipherSuite := helpers.Int32ToBigEndian(int(serverData.CipherDef.CipherSuite))
+	cipherSuite := []byte{19, 2}
+	// compressionMethod := []byte{byte(serverData.CipherDef.Spec.CompressionMethod)}
+	compressionMethod := []byte{0}
 	protocolVersion := serverData.Version
 
 	session := []byte{}
 	sessionLength := []byte{0}
 
-	if len(serverData.session) != 0 {
-		session = serverData.session
+	if binary.BigEndian.Uint16(serverData.Version) == 0x0304 {
+		session = sessiontmp
 		sessionLength = []byte{byte(len(session))}
+		fmt.Println("tls 1.3 session")
 	} else {
-		session = helpers.GenerateSession()
+		if len(serverData.session) != 0 {
+			session = serverData.session
+			sessionLength = []byte{byte(len(session))}
+		} else {
+			session = helpers.GenerateSession()
 
-		sessionLength = []byte{byte(len(session))}
-		serverData.session = session
+			sessionLength = []byte{byte(len(session))}
+			serverData.session = session
+		}
+
+	}
+	ext := []byte{}
+
+	if binary.BigEndian.Uint16(serverData.Version) == 0x0304 {
+		keyShareExt := []byte{0, 51, 0, 36, 0, 29, 0, 32}
+		if *serverData.CipherDef.DhParams.Group == cipher.DhGroupX25519 {
+			key := keys.GenerateX25519Key()
+			privateKey := key.Private()
+			pubKey := key.Public()
+
+			fmt.Println("we are using for sharedSecret1 ")
+			fmt.Println("priv key")
+			fmt.Println(privateKey)
+			fmt.Println("and pub key")
+			fmt.Println(keyShare)
+			sharedSecret1, _ := curve25519.X25519(privateKey, keyShare)
+			fmt.Println("Shared secret:", sharedSecret1)
+			serverHelloSecret = sharedSecret1
+			fmt.Println("this should be right")
+
+			keyShareExt = append(keyShareExt, pubKey...)
+
+		}
+
+		versionExt := []byte{0, 46, 0, 43, 0, 2, 3, 4}
+		extLength := helpers.Int32ToBigEndian(len(keyShareExt) + len(versionExt))
+
+		fmt.Println(extLength)
+		ext = append(ext, versionExt...)
+		ext = append(ext, keyShareExt...)
+
+		// Encrypted Extensions
+
+		// In all handshakes, the server MUST send the EncryptedExtensions
+		// message immediately after the ServerHello message.  This is the first
+		// message that is encrypted under keys derived from the
+		// server_handshake_traffic_secret.
+
+		// The EncryptedExtensions message contains extensions that can be
+		// protected, i.e., any which are not needed to establish the
+		// cryptographic context but which are not associated with individual
+		// certificates.  The client MUST check EncryptedExtensions for the
+		// presence of any forbidden extensions and if any are found MUST abort
+		// the handshake with an "illegal_parameter" alert.
+
+		// Structure of this message:
+
+		//    struct {
+		// 	   Extension extensions<0..2^16-1>;
+		//    } EncryptedExtensions;
+
+		// extensions:  A list of extensions.  For more information, see the
+		//    table in Section 4.2.
+
 	}
 
-	handshakeLength := len(unitTimeBytes) + len(randomBytes) + len(sessionLength) + len(session) + len(cipherSuite) + len(compressionMethod) + len(protocolVersion)
+	handshakeLength := len(unitTimeBytes) + len(randomBytes) + len(sessionLength) + len(session) + len(cipherSuite) + len(compressionMethod) + len(protocolVersion) + len(ext)
+	// handshakeLength := len(unitTimeBytes) + len(randomBytes) + len(sessionLength) + len(session) + len(protocolVersion) + len(ext)
 	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(handshakeLength)
 
 	if err != nil {
 		return fmt.Errorf("error converting int to big endian: %v", err)
 	}
+	// serverHello := []byte{22, 3, 3, 0, 122}
 
 	serverHello := []byte{byte(HandshakeMessageServerHello)}
+	// 22, 3, 3, 0, 122,
+	// serverHello = append(serverHello, []byte{0, 0, 118}...)
+	// serverHello = append(serverHello, []byte{0, 0, 118}...)
 	serverHello = append(serverHello, handshakeLengthByte...)
-	serverHello = append(serverHello, protocolVersion...)
+	serverHello = append(serverHello, []byte{3, 3}...)
+	// serverHello = append(serverHello, protocolVersion...)
 	serverHello = append(serverHello, unitTimeBytes...)
 	serverHello = append(serverHello, randomBytes...)
 	serverHello = append(serverHello, sessionLength...)
 	serverHello = append(serverHello, session...)
 	serverHello = append(serverHello, cipherSuite...)
 	serverHello = append(serverHello, compressionMethod...)
+	serverHello = append(serverHello, ext...)
+	fmt.Println("Server hello, cipher suite")
+	fmt.Println(cipherSuite)
+	fmt.Println(serverData.CipherDef.Spec.HashAlgorithm)
+	fmt.Println(serverHello)
+
+	fmt.Println("send data")
 
 	serverData.ServerRandom = unitTimeBytes
 	serverData.ServerRandom = append(serverData.ServerRandom, randomBytes...)
 
 	err = serverData.BuffSendData(ContentTypeHandshake, serverHello)
 
-	return err
-}
-
-func (serverData *ServerData) serverHelloDone() error {
-	serverHelloDone := []byte{byte(HandshakeMessageServerHelloDone)}
-	serverHelloDone = append(serverHelloDone, []byte{0, 0, 0}...) // Always 0 length
-
-	err := serverData.BuffSendData(ContentTypeHandshake, serverHelloDone)
+	if binary.BigEndian.Uint16(serverData.Version) == 0x0304 {
+		serverData.derive()
+	}
 
 	return err
 }
+
+// func (serverData *ServerData) serverHelloDone() error {
+// 	serverHelloDone := []byte{byte(HandshakeMessageServerHelloDone)}
+// 	serverHelloDone = append(serverHelloDone, []byte{0, 0, 0}...) // Always 0 length
+
+// 	err := serverData.BuffSendData(ContentTypeHandshake, serverHelloDone)
+
+// 	return err
+// }
 
 var masterKeyGenLabel = map[uint16][]byte{
 	0x0300: nil,
@@ -1117,7 +1366,7 @@ func (serverData *ServerData) SelectBlockCipherPadding() error {
 	switch binary.BigEndian.Uint16(serverData.Version) {
 	case 0x0300:
 		serverData.CipherDef.Spec.PaddingType = cipher.ZerosPaddingType
-	case 0x0301, 0x0302, 0x0303:
+	case 0x0301, 0x0302, 0x0303, 0x0304:
 		serverData.CipherDef.Spec.PaddingType = cipher.LengthPaddingType
 	default:
 		return fmt.Errorf("unsporrted version  in selct cipher padding")

@@ -193,6 +193,9 @@ Loop:
 				serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 			}
 
+			fmt.Println("incoming msg")
+			fmt.Println(msg)
+
 			for _, msg := range msgs {
 				err := handleMessage(msg, serverData)
 				if err != nil {

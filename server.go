@@ -22,6 +22,7 @@ func loadParams() params {
 	tls10Version := flag.Bool("tls1", false, "tls 1.0")
 	tls11Version := flag.Bool("tls1_1", false, "tls 1.1")
 	tls12Version := flag.Bool("tls1_2", false, "tls 1.2")
+	tls13Version := flag.Bool("tls1_3", false, "tls 1.3")
 	flag.Parse()
 
 	var certParam *handshake.HttpServerCertParam
@@ -36,10 +37,13 @@ func loadParams() params {
 	}
 
 	var version handshake.Version
-	if *tls12Version {
+	if *tls13Version {
+		fmt.Println("tls 1.3")
+		version = handshake.TLS13Version
+	} else if *tls12Version {
 		fmt.Println("tls 1.2")
 		version = handshake.TLS12Version
-	}else if *tls11Version {
+	} else if *tls11Version {
 		fmt.Println("tls 1.1")
 		version = handshake.TLS11Version
 	} else if *tls10Version {
