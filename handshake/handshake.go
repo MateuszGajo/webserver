@@ -2,6 +2,7 @@ package handshake
 
 //
 import (
+	"crypto/aes"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha1"
@@ -11,11 +12,13 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"io"
 	"os"
 	"reflect"
 	"sync"
 	"time"
 
+	cipher1 "crypto/cipher"
 	"handshakeServer/cipher"
 	"handshakeServer/helpers"
 
@@ -500,6 +503,7 @@ func (serverData *ServerData) sendData(data []byte) (n int, err error) {
 
 	fmt.Println("Send data")
 	fmt.Println(data)
+	fmt.Println("Send data")
 
 	n, err = serverData.conn.Write(data)
 	if err != nil {
@@ -517,7 +521,7 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 	}
 
 	msg := []byte{byte(contentData)}
-	msg = append(msg, serverData.Version...)
+	msg = append(msg, []byte{3, 3}...)
 
 	if serverData.IsServerEncrypted {
 
@@ -629,6 +633,134 @@ func (serverData *ServerData) handleLiveConnection() {
 
 }
 
+func ExampleNewGCMEncrypter(key, plaintext []byte) []byte {
+	// The key argument should be the AES key, either 16 or 32 bytes
+	// to select AES-128 or AES-256.
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	// Never use more than 2^32 random nonces with a given key because of the risk of a repeat.
+	nonce := make([]byte, 12)
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		panic(err.Error())
+	}
+
+	aesgcm, err := cipher1.NewGCM(block)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	ciphertext := aesgcm.Seal(nil, ivKey, plaintext, nil)
+	fmt.Printf("%x\n", ciphertext)
+
+	return ciphertext
+}
+
+func encryptRecord(clientWriteKey, clientWriteIV, plaintext []byte, sequenceNumber uint64) ([]byte, error) {
+	ivLength := len(clientWriteIV)
+
+	fmt.Println("write key")
+	fmt.Println(clientWriteKey)
+	fmt.Println(len(clientWriteKey))
+	// if sequenceNumber > maxSeqNum {
+	// 	return nil, fmt.Errorf("sequence number exceeded limit")
+	// }
+
+	// Derive per-record nonce
+	perRecordNonce := make([]byte, 12)
+	seqNumBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(seqNumBytes, sequenceNumber)
+	copy(perRecordNonce[ivLength-8:], seqNumBytes) // Pad to ivLength
+	for i := 0; i < len(clientWriteIV); i++ {
+		perRecordNonce[i] ^= clientWriteIV[i]
+	}
+
+	// Create AES-GCM cipher
+	block, err := aes.NewCipher(clientWriteKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %v", err)
+	}
+	aesGCM, err := cipher1.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %v", err)
+	}
+	fmt.Println("plaintext")
+	fmt.Println(plaintext)
+
+	// Construct additional data
+	// TLSCiphertext.opaque_type || TLSCiphertext.legacy_record_version || TLSCiphertext.length
+	additionalData := make([]byte, 5)
+	additionalData[0] = byte(ContentTypeApplicationData)    // opaque_type
+	binary.BigEndian.PutUint16(additionalData[1:3], 0x0303) // legacy_record_version
+	binary.BigEndian.PutUint16(additionalData[3:], uint16(len(plaintext)+aesGCM.Overhead()))
+
+	fmt.Println("aesgm overhread")
+	fmt.Println(aesGCM.Overhead())
+	fmt.Println("data length")
+	fmt.Println(len(plaintext))
+	fmt.Println(plaintext)
+
+	// dst := make([]byte, 1)
+
+	fmt.Println("additional data")
+	fmt.Println(additionalData)
+
+	fmt.Println("nonce ")
+	fmt.Println(perRecordNonce)
+
+	// Encrypt the plaintext
+	ciphertext := aesGCM.Seal(nil, perRecordNonce, plaintext, additionalData)
+
+	return ciphertext, nil
+}
+
+func (serverData *ServerData) encryptedExtensions() {
+	msgType := byte(HandshakeMessageEncryptedExtension)
+	ext := []byte{}
+	extLength := helpers.Int32ToBigEndian(len(ext))
+	msgLength, err := helpers.IntTo3BytesBigEndian(len(ext) + len(extLength))
+
+	if err != nil {
+		panic(err)
+	}
+
+	// iv 103 25 169 184 104 164 48 109 122 209 83 235
+	// key  249 251 242 231 224 206 34 229 213 178 125 62 18 89 213 169 76 235 184 171 176 14 5 174 2 220 8 46 150 72 50 186
+	// in  rec input
+	//8 0 0 2 0 0 22
+	// data  out
+	//195 69 174 252 186 101 46 169 6 180 70 206 142 53 21
+
+	encryptesExtMsg := []byte{msgType}
+	encryptesExtMsg = append(encryptesExtMsg, msgLength...)
+	encryptesExtMsg = append(encryptesExtMsg, extLength...)
+	encryptesExtMsg = append(encryptesExtMsg, ext...)
+	encryptesExtMsg = append(encryptesExtMsg, byte(22))
+
+	// we're missing mac
+	// cipherMsg := ExampleNewGCMEncrypter(writeSecret, encryptesExtMsg)
+	cipherMsg, err := encryptRecord(writeSecret, ivKey, encryptesExtMsg, 0)
+
+	fmt.Println("encrypted ext msg")
+	fmt.Println(encryptesExtMsg)
+	// serverData.conn.Write(encryptesExtMsg)
+	// //   opaque_type:  The outer opaque_type field of a TLSCiphertext record
+	// is always set to the value 23 (application_data) for outward
+	// compatibility with middleboxes accustomed to parsing previous
+	// versions of TLS.  The actual content type of the record is found
+	// in TLSInnerPlaintext.type after decryption.
+
+	// TODO: tls1.3 encrypt the data
+	serverData.BuffSendData(ContentTypeApplicationData, cipherMsg)
+	serverData.sendData(serverData.wBuff)
+}
+
+var writeSecret []byte
+var ivKey []byte
+
 func (serverData *ServerData) handleHandshake(contentData []byte) error {
 
 	handshakeMessageType := HandshakeMessageType(contentData[0])
@@ -645,9 +777,19 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 		// 	return fmt.Errorf("problem with change cipher in resuse sesstion, err: %v", err)
 		// }
 
-		_, err = serverData.sendData(serverData.wBuff)
-		serverData.conn.Write([]byte{20, 3, 3, 0, 1, 1})
-		serverData.conn.Write([]byte{23, 3, 3, 0, 23, 31, 116, 98, 167, 200, 71, 1, 101, 157, 208, 244, 116, 202, 90, 229, 171, 63, 161, 79, 3, 160, 248, 124})
+		if _, err = serverData.sendData(serverData.wBuff); err != nil {
+			return err
+		}
+		if err = serverData.changeCipher(); err != nil {
+			return fmt.Errorf("problem with changing cipher, err: %v", err)
+		}
+		if _, err = serverData.sendData(serverData.wBuff); err != nil {
+			return err
+		}
+		// serverData.conn.Write([]byte{20, 3, 3, 0, 1, 1})
+		serverData.encryptedExtensions()
+		// serverData.conn.Write([]byte{23, 3, 3, 0, 0})
+		// serverData.conn.Write([]byte{23, 3, 3, 0, 23, 31, 116, 98, 167, 200, 71, 1, 101, 157, 208, 244, 116, 202, 90, 229, 171, 63, 161, 79, 3, 160, 248, 124})
 		return err
 
 		// if serverData.reuseSession {
@@ -1136,18 +1278,51 @@ func (serverData *ServerData) derive() {
 	arr := make([]byte, serverData.CipherDef.Spec.HashSize)
 	earlySecret := hkdf.Extract(hash, arr, []byte{})
 
+	//     Derive-Secret(., "derived", "")
 	aa, err := serverData.DeriveSecret(earlySecret, []byte("derived"), []byte(""))
 
-	handshakeSecret := hkdf.Extract(hash, serverHelloSecret, aa)
+	derivedSecret := hkdf.Extract(hash, serverHelloSecret, aa)
+
+	fmt.Println("lets see dervied keys, secret")
+	fmt.Println(aa)
+	fmt.Println("and key")
+	fmt.Println(derivedSecret)
+	//
+
+	//             +-----> Derive-Secret(., "s hs traffic",
+	// |                     ClientHello...ServerHello)
+	// |                     = server_handshake_traffic_secret
+
+	handshakeMsgs := []byte{}
+
+	for _, v := range serverData.HandshakeMessages {
+		handshakeMsgs = append(handshakeMsgs, v...)
+	}
+
+	bb, err := serverData.DeriveSecret(derivedSecret, []byte("s hs traffic"), handshakeMsgs)
+
+	// handshakeSecret := hkdf.Extract(hash, serverHelloSecret, bb)
+	//
+
+	fmt.Println("lets see HAndshake~~!!!!!!!!!!!!!!!111, secret")
+	fmt.Println(bb)
+	// fmt.Println("and key")
+	// fmt.Println(handshakeSecret)
 
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("lets see secret")
-	fmt.Println(aa)
-	fmt.Println("and key")
-	fmt.Println(handshakeSecret)
+	write_key, err := serverData.HKDFExpandLabel(bb, []byte("key"), []byte(""), 32)
+	iv_key, err := serverData.HKDFExpandLabel(bb, []byte("iv"), []byte(""), 12)
+
+	fmt.Println("hello write key is:")
+	fmt.Println(write_key)
+	fmt.Println("hello iv is")
+	fmt.Println(iv_key)
+
+	writeSecret = write_key
+	ivKey = iv_key
 
 }
 
@@ -1273,8 +1448,6 @@ func (serverData *ServerData) serverHello() error {
 	fmt.Println(cipherSuite)
 	fmt.Println(serverData.CipherDef.Spec.HashAlgorithm)
 	fmt.Println(serverHello)
-
-	fmt.Println("send data")
 
 	serverData.ServerRandom = unitTimeBytes
 	serverData.ServerRandom = append(serverData.ServerRandom, randomBytes...)
