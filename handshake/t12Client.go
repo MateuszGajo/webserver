@@ -153,7 +153,7 @@ func T12PHash(hash func() hash.Hash, secret, seed []byte, length int) []byte {
 
 func T12Prf(secret, seed []byte, req_len int) []byte {
 
-	return T12PHash(sha256.New, secret, seed, req_len)[:req_len]
+	return T12PHash(sha512.New384, secret, seed, req_len)[:req_len]
 
 }
 
