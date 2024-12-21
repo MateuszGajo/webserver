@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"hash"
-	"io"
 	"os"
 	"reflect"
 	"sync"
@@ -472,48 +471,91 @@ func (serverData *ServerData) handleAlert(contentData []byte) {
 
 func (serverData *ServerData) loadCertificate() (error, []byte) {
 
-	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(len(serverData.cert) + 3 + 3)
-	if err != nil {
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
-		return errors.New("problem converting record layer length to big endina"), nil
-	}
+	// handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(len(serverData.cert) + 3 + 3)
+	// if err != nil {
+	// 	serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
+	// 	return errors.New("problem converting record layer length to big endina"), nil
+	// }
 
-	certLengthByte, err := helpers.IntTo3BytesBigEndian(len(serverData.cert) + 3)
-	if err != nil {
-		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
-		return errors.New("problem converting certs length to big endian"), nil
-	}
+	// certLengthByte, err := helpers.IntTo3BytesBigEndian(len(serverData.cert) + 3)
+	// if err != nil {
+	// 	serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
+	// 	return errors.New("problem converting certs length to big endian"), nil
+	// }
 
-	certLengthByteSingle, err := helpers.IntTo3BytesBigEndian(len(serverData.cert))
+	// serverCertificate := []byte{byte(HandshakeMessageCertificate)}
+	// // serverCertificate = append(serverCertificate, byte(0))
+	// serverCertificate = append(serverCertificate, handshakeLengthByte...)
+	// serverCertificate = append(serverCertificate, certLengthByte...)
+	// serverCertificate = append(serverCertificate, certLengthByteSingle...)
+	// serverCertificate = append(serverCertificate, serverData.cert...)
+	// serverCertificate = append(serverCertificate, []byte{0, 0}...)
+
+	// enum {
+	// 	X509(0),
+	// 	RawPublicKey(2),
+	// 	(255)
+	// } CertificateType;
+
+	// struct {
+	// 	select (certificate_type) {
+	// 		case RawPublicKey:
+	// 		  /* From RFC 7250 ASN.1_subjectPublicKeyInfo */
+	// 		  opaque ASN1_subjectPublicKeyInfo<1..2^24-1>;
+
+	// 		case X509:
+	// 		  opaque cert_data<1..2^24-1>;
+	// 	};
+	// 	Extension extensions<0..2^16-1>;
+	// } CertificateEntry;
+
+	// struct {
+	// 	opaque certificate_request_context<0..2^8-1>;
+	// 	CertificateEntry certificate_list<0..2^24-1>;
+	// } Certificate;
+
+	//certificate_request_context:  If this message is in response to a CertificateRequest, the value of certificate_request_context inthat message.  Otherwise (in the case of server authentication), this field SHALL be zero length.
+
+	cerificateEntryExtenstionData := []byte{}
+	cerificateEntryExtenstionLength := helpers.Int32ToBigEndian(len(cerificateEntryExtenstionData))
+	cerificateEntryExtenstion := cerificateEntryExtenstionLength
+	cerificateEntryExtenstion = append(cerificateEntryExtenstion, cerificateEntryExtenstionData...)
+
+	certLength, err := helpers.IntTo3BytesBigEndian(len(serverData.cert))
 	if err != nil {
 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
 		return errors.New("problem converting cert length to big endian"), nil
 	}
 
-	serverCertificate := []byte{byte(HandshakeMessageCertificate)}
-	// serverCertificate = append(serverCertificate, byte(0))
-	serverCertificate = append(serverCertificate, handshakeLengthByte...)
-	serverCertificate = append(serverCertificate, certLengthByte...)
-	serverCertificate = append(serverCertificate, certLengthByteSingle...)
-	serverCertificate = append(serverCertificate, serverData.cert...)
-	serverCertificate = append(serverCertificate, []byte{20, 0, 0}...)
+	certificateEntryCertData := certLength
+	certificateEntryCertData = append(certificateEntryCertData, serverData.cert...)
 
-	cert := []byte{11, 0, 3, 62, 0, 0, 3, 58, 0, 3, 53, 48, 130, 3, 49, 48, 130, 2, 25, 160, 3, 2, 1, 2, 2, 20, 34, 233, 252, 89, 4, 135, 40, 63, 210, 152, 210, 35, 122, 93, 232, 104, 87, 238, 196, 210, 48, 13, 6, 9, 42, 134, 72, 134, 247, 13, 1, 1, 11, 5, 0, 48, 65, 49, 11, 48, 9, 6, 3, 85, 4, 6, 19, 2, 115, 115, 49, 11, 48, 9, 6, 3, 85, 4, 8, 12, 2, 115, 115, 49, 11, 48, 9, 6, 3, 85, 4, 7, 12, 2, 115, 115, 49, 11, 48, 9, 6, 3, 85, 4, 10, 12, 2, 115, 115, 49, 11, 48, 9, 6, 3, 85, 4, 11, 12, 2, 115, 115, 48, 30, 23, 13, 50, 52, 48, 57, 49, 54, 49, 56, 51, 57, 51, 55, 90, 23, 13, 50, 53, 48, 57, 49, 54, 49, 56, 51, 57, 51, 55, 90, 48, 65, 49, 11, 48, 9, 6, 3, 85, 4, 6, 19, 2, 115, 115, 49, 11, 48, 9, 6, 3, 85, 4, 8, 12, 2, 115, 115, 49, 11, 48, 9, 6, 3, 85, 4, 7, 12, 2, 115, 115, 49, 11, 48, 9, 6, 3, 85, 4, 10, 12, 2, 115, 115, 49, 11, 48, 9, 6, 3, 85, 4, 11, 12, 2, 115, 115, 48, 130, 1, 34, 48, 13, 6, 9, 42, 134, 72, 134, 247, 13, 1, 1, 1, 5, 0, 3, 130, 1, 15, 0, 48, 130, 1, 10, 2, 130, 1, 1, 0, 142, 245, 187, 173, 25, 182, 142, 163, 243, 30, 182, 117, 148, 48, 28, 137, 145, 234, 69, 243, 226, 178, 104, 111, 33, 125, 10, 78, 38, 201, 124, 221, 214, 50, 92, 177, 177, 69, 160, 106, 133, 220, 155, 234, 103, 232, 250, 205, 110, 204, 43, 21, 230, 114, 225, 141, 221, 254, 141, 212, 83, 42, 128, 220, 77, 47, 178, 230, 184, 64, 35, 143, 2, 181, 170, 4, 214, 189, 50, 246, 216, 4, 43, 143, 207, 101, 2, 97, 165, 156, 210, 63, 246, 0, 109, 8, 76, 192, 103, 162, 51, 224, 90, 64, 67, 187, 59, 190, 202, 193, 63, 232, 139, 126, 43, 7, 121, 224, 233, 151, 6, 23, 195, 88, 137, 216, 201, 52, 161, 93, 92, 69, 142, 82, 112, 147, 7, 9, 66, 33, 56, 167, 4, 222, 31, 17, 20, 212, 64, 18, 203, 58, 14, 24, 80, 115, 243, 11, 180, 96, 146, 235, 2, 232, 34, 221, 89, 102, 210, 203, 155, 87, 97, 219, 150, 67, 92, 79, 83, 22, 105, 226, 185, 57, 202, 182, 246, 97, 224, 140, 96, 208, 18, 144, 252, 231, 23, 250, 165, 10, 182, 226, 252, 201, 115, 219, 64, 224, 119, 83, 20, 232, 202, 62, 205, 107, 184, 18, 232, 0, 205, 26, 100, 211, 119, 137, 132, 193, 78, 45, 67, 200, 182, 154, 143, 251, 114, 168, 50, 81, 181, 95, 110, 238, 32, 206, 150, 175, 138, 156, 36, 186, 131, 155, 218, 83, 2, 3, 1, 0, 1, 163, 33, 48, 31, 48, 29, 6, 3, 85, 29, 14, 4, 22, 4, 20, 92, 106, 162, 191, 161, 244, 192, 70, 174, 92, 237, 130, 57, 243, 118, 48, 122, 228, 186, 186, 48, 13, 6, 9, 42, 134, 72, 134, 247, 13, 1, 1, 11, 5, 0, 3, 130, 1, 1, 0, 83, 16, 140, 140, 179, 58, 220, 217, 127, 211, 168, 176, 46, 222, 137, 96, 135, 238, 55, 164, 236, 146, 16, 251, 197, 31, 206, 34, 169, 82, 131, 60, 134, 144, 195, 211, 141, 38, 203, 42, 213, 247, 47, 104, 8, 238, 101, 5, 250, 236, 86, 1, 76, 239, 152, 50, 225, 69, 53, 194, 148, 159, 49, 88, 95, 106, 105, 128, 253, 145, 179, 121, 180, 253, 185, 160, 153, 248, 52, 189, 214, 95, 211, 241, 155, 238, 204, 179, 186, 41, 17, 115, 141, 172, 103, 156, 109, 140, 209, 111, 95, 248, 188, 255, 12, 124, 202, 72, 108, 193, 92, 124, 155, 236, 107, 231, 222, 206, 132, 191, 27, 193, 216, 181, 251, 192, 224, 133, 183, 30, 183, 11, 59, 140, 68, 68, 62, 96, 91, 154, 206, 53, 127, 155, 101, 65, 136, 25, 34, 244, 20, 161, 96, 233, 101, 136, 164, 113, 218, 204, 22, 206, 57, 56, 26, 37, 11, 232, 188, 3, 193, 101, 191, 59, 82, 214, 196, 190, 108, 94, 88, 33, 2, 224, 158, 238, 235, 89, 16, 139, 225, 189, 31, 10, 44, 36, 157, 28, 220, 88, 77, 48, 118, 182, 202, 140, 136, 114, 85, 5, 29, 239, 64, 216, 205, 73, 203, 220, 83, 35, 105, 193, 85, 114, 56, 188, 231, 95, 110, 24, 60, 82, 29, 212, 206, 63, 32, 51, 48, 185, 249, 32, 225, 142, 45, 108, 231, 144, 51, 186, 64, 254, 92, 216, 16, 249, 0, 0}
+	cerificateEntry := certificateEntryCertData
+	cerificateEntry = append(cerificateEntry, cerificateEntryExtenstion...)
+	certificateEntryLength, err := helpers.IntTo3BytesBigEndian(len(cerificateEntry))
 
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, cert)
-	sha := sha512.New384()
-	handshakeMsg := []byte{}
-	fmt.Println("handshake msgs")
-	for _, v := range serverData.HandshakeMessages {
-		fmt.Println(v)
-		handshakeMsg = append(handshakeMsg, v...)
+	if err != nil {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
+		return errors.New("problem converting certificate entry length length to big endian"), nil
 	}
-	sha.Write(handshakeMsg)
-	fmt.Println("hash handshake")
-	fmt.Println(sha.Sum(nil))
-	// err = serverData.BuffSendData(ContentTypeHandshake, serverCertificate)
 
-	return err, cert
+	certificateRequestContentData := []byte{}
+	certificateRequestContentLength := len(certificateRequestContentData)
+	certificateRequestContent := []byte{byte(certificateRequestContentLength)}
+	certificateRequestContent = append(certificateRequestContent, certificateRequestContentData...)
+
+	certMsg := certificateRequestContent
+	certMsg = append(certMsg, certificateEntryLength...)
+	certMsg = append(certMsg, cerificateEntry...)
+	certMsgLength, err := helpers.IntTo3BytesBigEndian(len(certMsg))
+
+	handshakeCertificateMsg := []byte{byte(HandshakeMessageCertificate)}
+	handshakeCertificateMsg = append(handshakeCertificateMsg, certMsgLength...)
+	handshakeCertificateMsg = append(handshakeCertificateMsg, certMsg...)
+
+	serverData.HandshakeMessages = append(serverData.HandshakeMessages, handshakeCertificateMsg)
+
+	return err, handshakeCertificateMsg
 
 }
 
@@ -661,32 +703,6 @@ func (serverData *ServerData) handleLiveConnection() {
 		}
 	}
 
-}
-
-func ExampleNewGCMEncrypter(key, plaintext []byte) []byte {
-	// The key argument should be the AES key, either 16 or 32 bytes
-	// to select AES-128 or AES-256.
-
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	// Never use more than 2^32 random nonces with a given key because of the risk of a repeat.
-	nonce := make([]byte, 12)
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		panic(err.Error())
-	}
-
-	aesgcm, err := cipher1.NewGCM(block)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	ciphertext := aesgcm.Seal(nil, ivKey, plaintext, nil)
-	fmt.Printf("%x\n", ciphertext)
-
-	return ciphertext
 }
 
 func encryptRecord(clientWriteKey, clientWriteIV, plaintext []byte, sequenceNumber uint64) ([]byte, error) {
@@ -935,64 +951,6 @@ func (serverData *ServerData) CertVerify() {
 	serverData.sendData(serverData.wBuff)
 	// }
 }
-
-// func (serverData *ServerData) derive2() {
-// 	hash := sha1.New
-
-// 	switch serverData.CipherDef.Spec.HashAlgorithm {
-// 	case cipher.HashAlgorithmSHA384:
-// 		hash = sha512.New384
-// 	default:
-// 		panic("hash function not implemneted")
-// 	}
-
-// 	//     Derive-Secret(., "derived", "")
-// 	derived, err := serverData.DeriveSecret(writeSecret, []byte("derived"), []byte(""))
-
-// 	derivedSecret := hkdf.Extract(hash, serverHelloSecret, aa)
-
-// 	fmt.Println("lets see dervied keys, secret")
-// 	fmt.Println(aa)
-// 	fmt.Println("and key")
-// 	fmt.Println(derivedSecret)
-// 	//
-
-// 	//             +-----> Derive-Secret(., "s hs traffic",
-// 	// |                     ClientHello...ServerHello)
-// 	// |                     = server_handshake_traffic_secret
-
-// 	handshakeMsgs := []byte{}
-
-// 	for _, v := range serverData.HandshakeMessages {
-// 		handshakeMsgs = append(handshakeMsgs, v...)
-// 	}
-
-// 	bb, err := serverData.DeriveSecret(derivedSecret, []byte("s hs traffic"), handshakeMsgs)
-
-// 	// handshakeSecret := hkdf.Extract(hash, serverHelloSecret, bb)
-// 	//
-
-// 	fmt.Println("lets see HAndshake~~!!!!!!!!!!!!!!!111, secret")
-// 	fmt.Println(bb)
-// 	// fmt.Println("and key")
-// 	// fmt.Println(handshakeSecret)
-
-// 	if err != nil {
-// 		panic(err)
-// 	}
-
-// 	write_key, err := serverData.HKDFExpandLabel(bb, []byte("key"), []byte(""), 32)
-// 	iv_key, err := serverData.HKDFExpandLabel(bb, []byte("iv"), []byte(""), 12)
-
-// 	fmt.Println("hello write key is:")
-// 	fmt.Println(write_key)
-// 	fmt.Println("hello iv is")
-// 	fmt.Println(iv_key)
-
-// 	writeSecret = write_key
-// 	ivKey = iv_key
-
-// }
 
 func HMAC(key, message []byte) []byte {
 	// Create a new HMAC object using the provided key and SHA-256.
