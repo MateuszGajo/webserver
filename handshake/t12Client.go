@@ -73,7 +73,7 @@ func (serverData *ServerData) T12GetServerKeyExchangeMessage() ([]byte, error) {
 	return keyExchangeData, nil
 }
 
-func (serverData *ServerData) T12GenerateFinishedHandshakeMac(label []byte, handshakeMessages [][]byte) []byte {
+func (serverData *ServerData) T12GenerateFinishedHandshakeMac(label []byte, handshakeMessages []byte) []byte {
 	// TODO: tls 1.0 implement this
 	// Legacy thing with fixed number of 48 bytes
 
@@ -86,11 +86,6 @@ func (serverData *ServerData) T12GenerateFinishedHandshakeMac(label []byte, hand
 	// Future cipher suites MAY specify other lengths but such length
 	// MUST be at least 12 bytes.
 	defaultVerifyDataLength := 12
-	allHandskaedMessageCombined := []byte{}
-
-	for _, v := range handshakeMessages {
-		allHandskaedMessageCombined = append(allHandskaedMessageCombined, v...)
-	}
 	// RFC 5246
 	//Hash denotes a Hash of the handshake messages.  For the PRF
 	//defined in Section 5, the Hash MUST be the Hash used as the basis
@@ -104,7 +99,7 @@ func (serverData *ServerData) T12GenerateFinishedHandshakeMac(label []byte, hand
 
 	sha256Func := sha256.New()
 
-	sha256Func.Write(allHandskaedMessageCombined)
+	sha256Func.Write(handshakeMessages)
 	sha256Hash := sha256Func.Sum(nil)
 
 	seed := label

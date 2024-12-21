@@ -72,7 +72,7 @@ func (serverData *ServerData) S3GetServerKeyExchangeMessage() ([]byte, error) {
 	return keyExchangeData, nil
 }
 
-func (serverData *ServerData) S3GenerateFinishedHandshakeMac(hashingAlgorithm hash.Hash, sender []byte, handshakeMessages [][]byte) []byte {
+func (serverData *ServerData) S3GenerateFinishedHandshakeMac(hashingAlgorithm hash.Hash, sender []byte, handshakeMessages []byte) []byte {
 	n := hashingAlgorithm.Size()
 	// Legacy thing with fixed number of 48 bytes
 	npad := (48 / n) * n
@@ -80,13 +80,7 @@ func (serverData *ServerData) S3GenerateFinishedHandshakeMac(hashingAlgorithm ha
 	pad1Arr := pad1[:npad]
 	pad2Arr := pad2[:npad]
 
-	allHandskaedMessageCombined := []byte{}
-
-	for _, v := range handshakeMessages {
-		allHandskaedMessageCombined = append(allHandskaedMessageCombined, v...)
-	}
-
-	hashingAlgorithm.Write(allHandskaedMessageCombined)
+	hashingAlgorithm.Write(handshakeMessages)
 	hashingAlgorithm.Write(sender)
 	hashingAlgorithm.Write(serverData.MasterKey)
 	hashingAlgorithm.Write(pad1Arr)

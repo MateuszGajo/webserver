@@ -39,7 +39,7 @@ type ServerData struct {
 	ClientRandom      []byte
 	ServerRandom      []byte
 	Version           []byte
-	HandshakeMessages [][]byte
+	HandshakeMessages []byte
 	MasterKey         []byte
 	CipherDef         cipher.CipherDef
 	ServerSeqNum      []byte

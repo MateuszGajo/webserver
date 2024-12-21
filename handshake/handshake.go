@@ -2,12 +2,10 @@ package handshake
 
 //
 import (
-	"crypto"
 	"crypto/aes"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -240,7 +238,7 @@ func handleMessage(clientData []byte, serverData *ServerData) error {
 	if contentType == byte(ContentTypeHandshake) {
 
 		handshakeLength := int32(dataContent[1])<<16 | int32(dataContent[2])<<8 | int32(dataContent[3])
-		serverData.HandshakeMessages = append(serverData.HandshakeMessages, dataContent[:handshakeLength+4])
+		serverData.HandshakeMessages = append(serverData.HandshakeMessages, dataContent[:handshakeLength+4]...)
 		err = serverData.handleHandshake(dataContent)
 
 	} else if contentType == byte(ContentTypeAlert) {
@@ -576,19 +574,8 @@ func (serverData *ServerData) sendData(data []byte) (n int, err error) {
 
 func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte) error {
 
-	if contentData == ContentTypeHandshake || contentData == ContentTypeApplicationData {
-		serverData.HandshakeMessages = append(serverData.HandshakeMessages, data)
-		// There is this problem that we send some data as apllication data, but it is indeed handshake data
-		fmt.Println("hash handshake")
-		sha := sha512.New384()
-		handshakeMsg := []byte{}
-
-		for _, v := range serverData.HandshakeMessages {
-			handshakeMsg = append(handshakeMsg, v...)
-		}
-		sha.Write(handshakeMsg)
-
-		fmt.Println(sha.Sum(nil))
+	if contentData == ContentTypeHandshake {
+		serverData.HandshakeMessages = append(serverData.HandshakeMessages, data...)
 	}
 
 	contentType := contentData
@@ -600,15 +587,15 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 		var err error
 
 		if binary.BigEndian.Uint16(serverData.Version) == 0x0304 {
+			// //   opaque_type:  The outer opaque_type field of a TLSCiphertext record
+			// is always set to the value 23 (application_data) for outward
+			// compatibility with middleboxes accustomed to parsing previous
+			// versions of TLS.  The actual content type of the record is found
+			// in TLSInnerPlaintext.type after decryption.
 			contentType = ContentTypeApplicationData
-			fmt.Println("encrypt with tls 1.3")
 
 			data = append(data, byte(22))
-			fmt.Println("data extended ")
-			fmt.Println(data)
 
-			fmt.Println("seq num")
-			fmt.Println(binary.BigEndian.Uint64(serverData.ServerSeqNum))
 			encryptedMsg, err = encryptRecord(writeSecret, ivKey, data, binary.BigEndian.Uint64(serverData.ServerSeqNum))
 			if err != nil {
 				serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionDecryptError)
@@ -781,47 +768,11 @@ func (serverData *ServerData) encryptedExtensions() {
 		panic(err)
 	}
 
-	// iv 103 25 169 184 104 164 48 109 122 209 83 235
-	// key  249 251 242 231 224 206 34 229 213 178 125 62 18 89 213 169 76 235 184 171 176 14 5 174 2 220 8 46 150 72 50 186
-	// in  rec input
-	//8 0 0 2 0 0 22
-	// data  out
-	//195 69 174 252 186 101 46 169 6 180 70 206 142 53 21
-
 	encryptesExtMsg := []byte{msgType}
 	encryptesExtMsg = append(encryptesExtMsg, msgLength...)
 	encryptesExtMsg = append(encryptesExtMsg, extLength...)
 	encryptesExtMsg = append(encryptesExtMsg, ext...)
-	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, encryptesExtMsg)
-	// There is this problem that we send some data as apllication data, but it is indeed handshake data
 
-	sha := sha512.New384()
-	handshakeMsg := []byte{}
-	fmt.Println("handshake msgs")
-	for _, v := range serverData.HandshakeMessages {
-		fmt.Println(v)
-		handshakeMsg = append(handshakeMsg, v...)
-	}
-	sha.Write(handshakeMsg)
-	fmt.Println("hash handshake")
-	fmt.Println(sha.Sum(nil))
-
-	// encryptesExtMsg = append(encryptesExtMsg, byte(22))
-
-	// we're missing mac
-	// cipherMsg := ExampleNewGCMEncrypter(writeSecret, encryptesExtMsg)
-	// cipherMsg, err := encryptRecord(writeSecret, ivKey, encryptesExtMsg, 0)
-
-	fmt.Println("encrypted ext msg")
-	fmt.Println(encryptesExtMsg)
-	// serverData.conn.Write(encryptesExtMsg)
-	// //   opaque_type:  The outer opaque_type field of a TLSCiphertext record
-	// is always set to the value 23 (application_data) for outward
-	// compatibility with middleboxes accustomed to parsing previous
-	// versions of TLS.  The actual content type of the record is found
-	// in TLSInnerPlaintext.type after decryption.
-
-	// TODO: tls1.3 encrypt the data
 	serverData.BuffSendData(ContentTypeHandshake, encryptesExtMsg)
 	serverData.sendData(serverData.wBuff)
 }
@@ -830,150 +781,78 @@ var writeSecret []byte
 var handshakesecret []byte
 var ivKey []byte
 
-func SignData(privateKey *rsa.PrivateKey, data []byte) ([]byte, error) {
-	// Hash the data using SHA-256
-	hasher := sha256.New()
-	_, err := hasher.Write(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to hash data: %v", err)
-	}
-	hashed := hasher.Sum(nil)
+func (serverData *ServerData) CertVerify() error {
 
-	// Set salt length to the hash size (32 bytes for SHA-256)
-	saltLength := hasher.Size()
+	// 	The digital signature is then computed over the concatenation of:
 
-	// Sign the hash using RSA-PSS with MGF1 using SHA-256
-	signature, err := rsa.SignPSS(rand.Reader, privateKey, crypto.SHA256, hashed, &rsa.PSSOptions{
-		SaltLength: saltLength,
-		Hash:       crypto.SHA256,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign data: %v", err)
-	}
+	//    -  A string that consists of octet 32 (0x20) repeated 64 times
 
-	// Return the base64-encoded signature
-	return signature, nil
-}
+	//    -  The context string
 
-func (serverData *ServerData) CertVerify() {
-	// enum {
-	// 	/* RSASSA-PKCS1-v1_5 algorithms */
-	// 	rsa_pkcs1_sha256(0x0401),
-	// 	rsa_pkcs1_sha384(0x0501),
-	// 	rsa_pkcs1_sha512(0x0601),
+	//    -  A single 0 byte which serves as the separator
 
-	// 	/* ECDSA algorithms */
-	// 	ecdsa_secp256r1_sha256(0x0403),
-	// 	ecdsa_secp384r1_sha384(0x0503),
-	// 	ecdsa_secp521r1_sha512(0x0603),
+	//    -  The content to be signed - basically hadnshake messages Transcript-Hash(Handshake Context, Certificate)
 
-	// 	/* RSASSA-PSS algorithms with public key OID rsaEncryption */
-	// 	rsa_pss_rsae_sha256(0x0804),
-	// 	rsa_pss_rsae_sha384(0x0805),
-	// 	rsa_pss_rsae_sha512(0x0806),
-
-	// 	/* EdDSA algorithms */
-	// 	ed25519(0x0807),
-	// 	ed448(0x0808),
-
-	// 	/* RSASSA-PSS algorithms with public key OID RSASSA-PSS */
-	// 	rsa_pss_pss_sha256(0x0809),
-	// 	rsa_pss_pss_sha384(0x080a),
-	// 	rsa_pss_pss_sha512(0x080b),
-
-	// 	/* Legacy algorithms */
-	// 	rsa_pkcs1_sha1(0x0201),
-	// 	ecdsa_sha1(0x0203),
-
-	// 	/* Reserved Code Points */
-	// 	private_use(0xFE00..0xFFFF),
-	// 	(0xFFFF)
-	// } SignatureScheme;
-	// certVerify := []byte{
-	// 	15, 0, 1, 4, 8, 4, 1, 0, 48, 232, 108, 214, 141, 113, 42, 212, 172, 23, 109, 4, 109, 84, 31, 54, 28, 78, 204, 123, 79, 254, 134, 216, 162, 120, 62, 202, 40, 15, 182, 211, 142, 48, 119, 58, 7, 130, 181, 25, 112, 241, 185, 103, 218, 172, 114, 69, 133, 109, 179, 105, 181, 197, 40, 216, 230, 249, 106, 0, 31, 192, 89, 200, 133, 214, 125, 218, 50, 210, 170, 167, 115, 30, 16, 203, 81, 95, 103, 47, 99, 151, 211, 11, 111, 9, 29, 55, 28, 15, 165, 52, 12, 188, 3, 57, 60, 179, 64, 221, 187, 251, 75, 225, 8, 97, 78, 153, 242, 23, 39, 90, 84, 35, 221, 138, 45, 247, 116, 182, 60, 190, 189, 99, 110, 58, 171, 179, 1, 229, 23, 25, 204, 130, 19, 174, 215, 79, 15, 145, 116, 37, 176, 10, 118, 204, 34, 38, 100, 249, 45, 143, 154, 27, 149, 136, 104, 4, 185, 110, 138, 206, 13, 254, 141, 70, 58, 214, 84, 49, 195, 180, 165, 68, 81, 90, 134, 67, 152, 182, 89, 99, 54, 92, 52, 90, 0, 213, 84, 238, 184, 28, 197, 194, 89, 121, 243, 57, 17, 9, 158, 23, 111, 157, 26, 51, 218, 50, 155, 173, 48, 47, 45, 69, 216, 24, 237, 80, 132, 85, 196, 189, 150, 143, 69, 253, 160, 64, 49, 177, 229, 112, 39, 1, 17, 140, 61, 72, 79, 5, 91, 106, 219, 165, 25, 109, 11, 160, 25, 24, 129, 214, 145, 151, 168, 15,
-	// }
-	// certVerify = append(certVerify, byte(22))
-
-	certVerify := []byte{15, 0, 1, 4, 8, 4, 1, 0}
+	OctetLength := 64
+	OctetByte := byte(32)
+	SeparatorByte := byte(0)
 
 	signatureData := []byte{}
 
-	for i := 0; i < 64; i++ {
-		signatureData = append(signatureData, 32)
+	for i := 0; i < OctetLength; i++ {
+		signatureData = append(signatureData, OctetByte)
 	}
 
 	serverContext := "TLS 1.3, server CertificateVerify"
 
 	signatureData = append(signatureData, []byte(serverContext)...)
-	signatureData = append(signatureData, 0)
+	signatureData = append(signatureData, SeparatorByte)
 
 	sha := sha512.New384()
-	handshakeMsg := []byte{}
-	fmt.Println("handshake msgs")
-	for _, v := range serverData.HandshakeMessages {
-		fmt.Println(v)
-		handshakeMsg = append(handshakeMsg, v...)
-	}
-	sha.Write(handshakeMsg)
-	fmt.Println("hash handshake")
+	sha.Write(serverData.HandshakeMessages)
 	hash := sha.Sum(nil)
-	fmt.Println(hash)
 	signatureData = append(signatureData, hash...)
 
-	fmt.Println("signature data")
-	fmt.Println(signatureData)
-
-	sha.Reset()
-	sha.Write(signatureData)
-	// signatureHashed := sha.Sum(nil)
-
-	if serverData.CipherDef.Rsa.PrivateKey == nil {
-		panic("private key empty")
-	}
-
-	signature, err := SignData(serverData.CipherDef.Rsa.PrivateKey, signatureData)
+	signature, err := serverData.CipherDef.TLS13SignData(signatureData)
 
 	if err != nil {
-		panic(err)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
+		return fmt.Errorf("problem signing data, err: %v", err)
 	}
 
-	fmt.Println("signature")
-	fmt.Println(signature)
-	fmt.Println(len(signature))
-	certVerify = append(certVerify, signature...)
-	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, certVerify)
-	// certVerify = append(certVerify, 22)
+	algorithm := []byte{8, 4} // TODO: tls1.3
+	cerificateVerifySignatureLength := helpers.Int32ToBigEndian(len(signature))
 
-	// cipherMsg, _ := encryptRecord(writeSecret, ivKey, certVerify, 2)
+	msg := algorithm
+	msg = append(msg, cerificateVerifySignatureLength...)
+	msg = append(msg, signature...)
 
-	// serverData.conn.Write(encryptesExtMsg)
-	// //   opaque_type:  The outer opaque_type field of a TLSCiphertext record
-	// is always set to the value 23 (application_data) for outward
-	// compatibility with middleboxes accustomed to parsing previous
-	// versions of TLS.  The actual content type of the record is found
-	// in TLSInnerPlaintext.type after decryption.
+	certificateVerifyLength, err := helpers.IntTo3BytesBigEndian(len(msg))
 
-	// TODO: tls1.3 encrypt the data
-	fmt.Println("Cert verify")
-	serverData.BuffSendData(ContentTypeHandshake, certVerify)
-	serverData.sendData(serverData.wBuff)
-	// }
+	if err != nil {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
+		return fmt.Errorf("problem converting certifcate verify msg length to big endian, err: %v", err)
+	}
+
+	handshakeMsg := []byte{byte(HandshakeMessageCertificateVerify)}
+	handshakeMsg = append(handshakeMsg, certificateVerifyLength...)
+	handshakeMsg = append(handshakeMsg, msg...)
+
+	serverData.BuffSendData(ContentTypeHandshake, handshakeMsg)
+
+	return nil
 }
 
 func HMAC(key, message []byte) []byte {
-	// Create a new HMAC object using the provided key and SHA-256.
 	h := hmac.New(sha512.New384, key)
-	// Write the message to the HMAC object.
+
 	h.Write(message)
-	// Compute the final HMAC digest and return it.
+
 	return h.Sum(nil)
 }
 
 func (serverData *ServerData) finishMsg() {
 	handshakeSecret := handshakesecret
-
-	fmt.Println("handshake secret in finsih")
-	fmt.Println(handshakeSecret)
 
 	finish_key, err := serverData.HKDFExpandLabel(handshakeSecret, []byte("finished"), []byte(""), 48)
 
@@ -981,26 +860,11 @@ func (serverData *ServerData) finishMsg() {
 		panic(err)
 	}
 
-	fmt.Println("hello finish key is:")
-	fmt.Println(finish_key)
-
 	sha := sha512.New384()
-	handshakeMsg := []byte{}
-	fmt.Println("handshake msgs")
-	for _, v := range serverData.HandshakeMessages {
-		fmt.Println(v)
-		handshakeMsg = append(handshakeMsg, v...)
-	}
-	sha.Write(handshakeMsg)
-	fmt.Println("hash handshake")
+
+	sha.Write(serverData.HandshakeMessages)
 	transcriptHash := sha.Sum(nil)
-	fmt.Println(transcriptHash)
-
 	verifyData := HMAC(finish_key, transcriptHash)[:serverData.CipherDef.Spec.HashSize]
-
-	fmt.Println("verify Data")
-	fmt.Println(verifyData)
-	fmt.Println("verify Data")
 
 	verifyDataMsg := []byte{byte(HandshakeMessageFinished)}
 	verifyDataLength, _ := helpers.IntTo3BytesBigEndian(len(verifyData))
@@ -1023,7 +887,6 @@ func (serverData *ServerData) finishMsg() {
 	// TODO: tls1.3 encrypt the data
 	fmt.Println("verify Data")
 	serverData.BuffSendData(ContentTypeHandshake, verifyDataMsg)
-	serverData.sendData(serverData.wBuff)
 
 }
 
@@ -1039,19 +902,15 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 			return fmt.Errorf("\n problem with serverHello msg : %v", err)
 		}
 
-		// if err = serverData.changeCipher(); err != nil {
-		// 	return fmt.Errorf("problem with change cipher in resuse sesstion, err: %v", err)
+		// if _, err = serverData.sendData(serverData.wBuff); err != nil {
+		// 	return err
 		// }
-
-		if _, err = serverData.sendData(serverData.wBuff); err != nil {
-			return err
-		}
 		if err = serverData.changeCipher(); err != nil {
 			return fmt.Errorf("problem with changing cipher, err: %v", err)
 		}
-		if _, err = serverData.sendData(serverData.wBuff); err != nil {
-			return err
-		}
+		// if _, err = serverData.sendData(serverData.wBuff); err != nil {
+		// 	return err
+		// }
 		// serverData.conn.Write([]byte{20, 3, 3, 0, 1, 1})
 		serverData.encryptedExtensions()
 
@@ -1074,11 +933,13 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 		fmt.Println("Cert")
 		fmt.Println(cert)
 		serverData.BuffSendData(ContentTypeHandshake, cert)
-		serverData.sendData(serverData.wBuff)
+		// serverData.sendData(serverData.wBuff)
 
 		serverData.CertVerify()
 
 		serverData.finishMsg()
+
+		serverData.sendData(serverData.wBuff)
 		// }
 		// fmt.Println("Cert")
 		// fmt.Println(cipherMsg)
@@ -1581,13 +1442,7 @@ func (serverData *ServerData) derive() {
 	// |                     ClientHello...ServerHello)
 	// |                     = server_handshake_traffic_secret
 
-	handshakeMsgs := []byte{}
-
-	for _, v := range serverData.HandshakeMessages {
-		handshakeMsgs = append(handshakeMsgs, v...)
-	}
-
-	handshakeSecretKey, err := serverData.DeriveSecret(derivedSecret, []byte("s hs traffic"), handshakeMsgs)
+	handshakeSecretKey, err := serverData.DeriveSecret(derivedSecret, []byte("s hs traffic"), serverData.HandshakeMessages)
 
 	// handshakeSecret := hkdf.Extract(hash, serverHelloSecret, bb)
 	//
@@ -1905,7 +1760,7 @@ func (serverData *ServerData) serverFinished() error {
 
 }
 
-func (serverData *ServerData) generateFinishedHandshakeMac(label []byte, handshakeMessages [][]byte) []byte {
+func (serverData *ServerData) generateFinishedHandshakeMac(label []byte, handshakeMessages []byte) []byte {
 	switch binary.BigEndian.Uint16(serverData.Version) {
 	case 0x0300:
 		md5Hash := serverData.S3GenerateFinishedHandshakeMac(md5.New(), label, handshakeMessages) // -1 without last message witch is client verify

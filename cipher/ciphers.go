@@ -6,6 +6,7 @@ import (
 	"crypto/dsa"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/asn1"
 	"encoding/binary"
 	"fmt"
@@ -372,6 +373,31 @@ func (cipherDef *CipherDef) GenerateServerKeyExchange() ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("Key exchange parameters not implemented for: %v", cipherDef.Spec.KeyExchange)
 	}
+}
+
+func (cipherDef *CipherDef) TLS13SignData(data []byte) ([]byte, error) {
+	// Hash the data using SHA-256
+	hasher := sha256.New()
+	_, err := hasher.Write(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash data: %v", err)
+	}
+	hashed := hasher.Sum(nil)
+
+	// Set salt length to the hash size (32 bytes for SHA-256)
+	saltLength := hasher.Size()
+
+	// Sign the hash using RSA-PSS with MGF1 using SHA-256
+	signature, err := rsa.SignPSS(rand.Reader, cipherDef.Rsa.PrivateKey, crypto.SHA256, hashed, &rsa.PSSOptions{
+		SaltLength: saltLength,
+		Hash:       crypto.SHA256,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign data: %v", err)
+	}
+
+	// Return the base64-encoded signature
+	return signature, nil
 }
 
 func (cipherDef *CipherDef) SignData(hash []byte) ([]byte, error) {
