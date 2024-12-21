@@ -553,7 +553,7 @@ func (serverData *ServerData) loadCertificate() (error, []byte) {
 	handshakeCertificateMsg = append(handshakeCertificateMsg, certMsgLength...)
 	handshakeCertificateMsg = append(handshakeCertificateMsg, certMsg...)
 
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, handshakeCertificateMsg)
+	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, handshakeCertificateMsg)
 
 	return err, handshakeCertificateMsg
 
@@ -576,7 +576,7 @@ func (serverData *ServerData) sendData(data []byte) (n int, err error) {
 
 func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte) error {
 
-	if contentData == ContentTypeHandshake || (contentData == ContentTypeApplicationData && data[len(data)-1] == byte(ContentTypeHandshake)) {
+	if contentData == ContentTypeHandshake || contentData == ContentTypeApplicationData {
 		serverData.HandshakeMessages = append(serverData.HandshakeMessages, data)
 		// There is this problem that we send some data as apllication data, but it is indeed handshake data
 		fmt.Println("hash handshake")
@@ -591,64 +591,91 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 		fmt.Println(sha.Sum(nil))
 	}
 
-	msg := []byte{byte(contentData)}
+	contentType := contentData
+	content := data
+
+	if serverData.IsServerEncrypted && contentData != ContentTypeChangeCipherSpec {
+
+		var encryptedMsg []byte
+		var err error
+
+		if binary.BigEndian.Uint16(serverData.Version) == 0x0304 {
+			contentType = ContentTypeApplicationData
+			fmt.Println("encrypt with tls 1.3")
+
+			data = append(data, byte(22))
+			fmt.Println("data extended ")
+			fmt.Println(data)
+
+			fmt.Println("seq num")
+			fmt.Println(binary.BigEndian.Uint64(serverData.ServerSeqNum))
+			encryptedMsg, err = encryptRecord(writeSecret, ivKey, data, binary.BigEndian.Uint64(serverData.ServerSeqNum))
+			if err != nil {
+				serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionDecryptError)
+				return err
+			}
+
+			// serverData.conn.Write(encryptesExtMsg)
+			// //   opaque_type:  The outer opaque_type field of a TLSCiphertext record
+			// is always set to the value 23 (application_data) for outward
+			// compatibility with middleboxes accustomed to parsing previous
+			// versions of TLS.  The actual content type of the record is found
+			// in TLSInnerPlaintext.type after decryption.
+
+		} else {
+			mac := serverData.generateStreamCipher([]byte{byte(contentData)}, data, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
+			// Iv is a pseudo-random function used along with key to add randomness to encryption proces. The IV ensure if the same plaintext is encrypted multiple time with the same key, the result is different
+			// Why iv is inside message?
+			// Iv used to be taken from last msg, attacker that has access to plaintext of message can send request and with a use of reverse engineering deduce content of the message.
+			// For example, Alice's ciphertext-block-1 (aC1) is result of Alice's PlainText-block-1 (aP1) being XORed with the iv generate for the encryptioin
+			// ac1=e(ao1 xor aiv)
+			// If the eavesdropper (Eve) can predict the IV to be used for her encryption (eIV) then she can choose plaintext such the Eve's Plaintext-Block-1(eP1)
+			// eP1=aIv xor eIV xor PG1
+			// Wher PG1 is Plaintext-guess-Block-1 which is what Eve is guessing for the value of aP1. This allows a dirt trick to be played in the calculation of Eve's ciphertext-block01(ec1)
+			// ec1 = e(ep1 xor eiv)
+			// ec1 = e(aiv xor eiv xor pg1 xor eiv)
+			// ec1 - e(aiv xor pg1)
+			// Therefore if Eve's plainText-Guess block-1 is a match for Alice plaintext-block1 then ec1=Ac1
+			// Now you might be thinking that for AES which has a 128-bit block size that Eve will still have her work cut out for herself as there is a huge range of possibilities for plaintext values. You would be right as a guess has a 1 in 2^128 (3.40282366921e38) chance of being right; however, that can be wittled down further as language is not random, not all bytes map to printable characters, context matters, and the protocol might have additional features that can be leveraged.
+			// source: https://derekwill.com/2021/01/01/aes-cbc-mode-chosen-plaintext-attack/
+			dataWithMac := []byte{}
+			if binary.BigEndian.Uint16(serverData.Version) >= uint16(TLS11Version) {
+				Iv := make([]byte, serverData.CipherDef.Spec.IvSize)
+				_, err := rand.Read(Iv)
+				if err != nil {
+					return fmt.Errorf("can't generate iv, err: %v", err)
+				}
+				dataWithMac = Iv
+			}
+			dataWithMac = append(dataWithMac, data...)
+			dataWithMac = append(dataWithMac, mac...)
+
+			encryptedMsg, err = serverData.CipherDef.EncryptMessage(dataWithMac, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
+
+			if err != nil {
+				serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionBadRecordMac)
+				return err
+			}
+		}
+
+		content = encryptedMsg
+
+		for i := 7; i >= 0; i-- {
+			serverData.ServerSeqNum[i] += 1
+			if serverData.ServerSeqNum[i] != 0 {
+				break
+			}
+		}
+	} else {
+	}
+
+	msg := []byte{byte(contentType)}
+
 	msg = append(msg, []byte{3, 3}...)
 
-	// if serverData.IsServerEncrypted {
-
-	// 	mac := serverData.generateStreamCipher([]byte{byte(contentData)}, data, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
-	// 	// Iv is a pseudo-random function used along with key to add randomness to encryption proces. The IV ensure if the same plaintext is encrypted multiple time with the same key, the result is different
-	// 	// Why iv is inside message?
-	// 	// Iv used to be taken from last msg, attacker that has access to plaintext of message can send request and with a use of reverse engineering deduce content of the message.
-	// 	// For example, Alice's ciphertext-block-1 (aC1) is result of Alice's PlainText-block-1 (aP1) being XORed with the iv generate for the encryptioin
-	// 	// ac1=e(ao1 xor aiv)
-	// 	// If the eavesdropper (Eve) can predict the IV to be used for her encryption (eIV) then she can choose plaintext such the Eve's Plaintext-Block-1(eP1)
-	// 	// eP1=aIv xor eIV xor PG1
-	// 	// Wher PG1 is Plaintext-guess-Block-1 which is what Eve is guessing for the value of aP1. This allows a dirt trick to be played in the calculation of Eve's ciphertext-block01(ec1)
-	// 	// ec1 = e(ep1 xor eiv)
-	// 	// ec1 = e(aiv xor eiv xor pg1 xor eiv)
-	// 	// ec1 - e(aiv xor pg1)
-	// 	// Therefore if Eve's plainText-Guess block-1 is a match for Alice plaintext-block1 then ec1=Ac1
-	// 	// Now you might be thinking that for AES which has a 128-bit block size that Eve will still have her work cut out for herself as there is a huge range of possibilities for plaintext values. You would be right as a guess has a 1 in 2^128 (3.40282366921e38) chance of being right; however, that can be wittled down further as language is not random, not all bytes map to printable characters, context matters, and the protocol might have additional features that can be leveraged.
-	// 	// source: https://derekwill.com/2021/01/01/aes-cbc-mode-chosen-plaintext-attack/
-	// 	dataWithMac := []byte{}
-	// 	if binary.BigEndian.Uint16(serverData.Version) >= uint16(TLS11Version) {
-	// 		Iv := make([]byte, serverData.CipherDef.Spec.IvSize)
-	// 		_, err := rand.Read(Iv)
-	// 		if err != nil {
-	// 			return fmt.Errorf("can't generate iv, err: %v", err)
-	// 		}
-	// 		dataWithMac = Iv
-	// 	}
-	// 	dataWithMac = append(dataWithMac, data...)
-	// 	dataWithMac = append(dataWithMac, mac...)
-
-	// 	encryptedMsg, err := serverData.CipherDef.EncryptMessage(dataWithMac, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
-
-	// 	if err != nil {
-	// 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionBadRecordMac)
-	// 		return err
-	// 	}
-
-	// 	msg = append(msg, helpers.Int32ToBigEndian(len(encryptedMsg))...)
-	// 	msg = append(msg, encryptedMsg...)
-
-	// 	data = msg
-
-	// 	for i := 7; i >= 0; i-- {
-	// 		serverData.ServerSeqNum[i] += 1
-	// 		if serverData.ServerSeqNum[i] != 0 {
-	// 			break
-	// 		}
-	// 	}
-	// }
-	// else {
-
-	msg = append(msg, helpers.Int32ToBigEndian(len(data))...)
+	msg = append(msg, helpers.Int32ToBigEndian(len(content))...)
 	// msg = append(msg, []byte{0, 122}...)
-	msg = append(msg, data...)
-
-	// }
+	msg = append(msg, content...)
 
 	serverData.wBuff = append(serverData.wBuff, msg...)
 	fmt.Println("prepared data to send")
@@ -708,9 +735,6 @@ func (serverData *ServerData) handleLiveConnection() {
 func encryptRecord(clientWriteKey, clientWriteIV, plaintext []byte, sequenceNumber uint64) ([]byte, error) {
 	ivLength := len(clientWriteIV)
 
-	fmt.Println("write key")
-	fmt.Println(clientWriteKey)
-	fmt.Println(len(clientWriteKey))
 	// if sequenceNumber > maxSeqNum {
 	// 	return nil, fmt.Errorf("sequence number exceeded limit")
 	// }
@@ -733,8 +757,6 @@ func encryptRecord(clientWriteKey, clientWriteIV, plaintext []byte, sequenceNumb
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GCM: %v", err)
 	}
-	fmt.Println("plaintext")
-	fmt.Println(plaintext)
 
 	// Construct additional data
 	// TLSCiphertext.opaque_type || TLSCiphertext.legacy_record_version || TLSCiphertext.length
@@ -742,20 +764,6 @@ func encryptRecord(clientWriteKey, clientWriteIV, plaintext []byte, sequenceNumb
 	additionalData[0] = byte(ContentTypeApplicationData)    // opaque_type
 	binary.BigEndian.PutUint16(additionalData[1:3], 0x0303) // legacy_record_version
 	binary.BigEndian.PutUint16(additionalData[3:], uint16(len(plaintext)+aesGCM.Overhead()))
-
-	fmt.Println("aesgm overhread")
-	fmt.Println(aesGCM.Overhead())
-	fmt.Println("data length")
-	fmt.Println(len(plaintext))
-	fmt.Println(plaintext)
-
-	// dst := make([]byte, 1)
-
-	fmt.Println("additional data")
-	fmt.Println(additionalData)
-
-	fmt.Println("nonce ")
-	fmt.Println(perRecordNonce)
 
 	// Encrypt the plaintext
 	ciphertext := aesGCM.Seal(nil, perRecordNonce, plaintext, additionalData)
@@ -784,7 +792,7 @@ func (serverData *ServerData) encryptedExtensions() {
 	encryptesExtMsg = append(encryptesExtMsg, msgLength...)
 	encryptesExtMsg = append(encryptesExtMsg, extLength...)
 	encryptesExtMsg = append(encryptesExtMsg, ext...)
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, encryptesExtMsg)
+	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, encryptesExtMsg)
 	// There is this problem that we send some data as apllication data, but it is indeed handshake data
 
 	sha := sha512.New384()
@@ -798,11 +806,11 @@ func (serverData *ServerData) encryptedExtensions() {
 	fmt.Println("hash handshake")
 	fmt.Println(sha.Sum(nil))
 
-	encryptesExtMsg = append(encryptesExtMsg, byte(22))
+	// encryptesExtMsg = append(encryptesExtMsg, byte(22))
 
 	// we're missing mac
 	// cipherMsg := ExampleNewGCMEncrypter(writeSecret, encryptesExtMsg)
-	cipherMsg, err := encryptRecord(writeSecret, ivKey, encryptesExtMsg, 0)
+	// cipherMsg, err := encryptRecord(writeSecret, ivKey, encryptesExtMsg, 0)
 
 	fmt.Println("encrypted ext msg")
 	fmt.Println(encryptesExtMsg)
@@ -814,7 +822,7 @@ func (serverData *ServerData) encryptedExtensions() {
 	// in TLSInnerPlaintext.type after decryption.
 
 	// TODO: tls1.3 encrypt the data
-	serverData.BuffSendData(ContentTypeApplicationData, cipherMsg)
+	serverData.BuffSendData(ContentTypeHandshake, encryptesExtMsg)
 	serverData.sendData(serverData.wBuff)
 }
 
@@ -933,10 +941,10 @@ func (serverData *ServerData) CertVerify() {
 	fmt.Println(signature)
 	fmt.Println(len(signature))
 	certVerify = append(certVerify, signature...)
-	serverData.HandshakeMessages = append(serverData.HandshakeMessages, certVerify)
-	certVerify = append(certVerify, 22)
+	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, certVerify)
+	// certVerify = append(certVerify, 22)
 
-	cipherMsg, _ := encryptRecord(writeSecret, ivKey, certVerify, 2)
+	// cipherMsg, _ := encryptRecord(writeSecret, ivKey, certVerify, 2)
 
 	// serverData.conn.Write(encryptesExtMsg)
 	// //   opaque_type:  The outer opaque_type field of a TLSCiphertext record
@@ -947,7 +955,7 @@ func (serverData *ServerData) CertVerify() {
 
 	// TODO: tls1.3 encrypt the data
 	fmt.Println("Cert verify")
-	serverData.BuffSendData(ContentTypeApplicationData, cipherMsg)
+	serverData.BuffSendData(ContentTypeHandshake, certVerify)
 	serverData.sendData(serverData.wBuff)
 	// }
 }
@@ -998,12 +1006,12 @@ func (serverData *ServerData) finishMsg() {
 	verifyDataLength, _ := helpers.IntTo3BytesBigEndian(len(verifyData))
 	verifyDataMsg = append(verifyDataMsg, verifyDataLength...)
 	verifyDataMsg = append(verifyDataMsg, verifyData...)
-	verifyDataMsg = append(verifyDataMsg, 22)
+	// verifyDataMsg = append(verifyDataMsg, 22)
 
 	// fmt.Println("verify Data msg")
 	// fmt.Println(verifyDataMsg)
 
-	cipherMsg, _ := encryptRecord(writeSecret, ivKey, verifyDataMsg, 3)
+	// cipherMsg, _ := encryptRecord(writeSecret, ivKey, verifyDataMsg, 3)
 
 	// serverData.conn.Write(encryptesExtMsg)
 	// //   opaque_type:  The outer opaque_type field of a TLSCiphertext record
@@ -1014,7 +1022,7 @@ func (serverData *ServerData) finishMsg() {
 
 	// TODO: tls1.3 encrypt the data
 	fmt.Println("verify Data")
-	serverData.BuffSendData(ContentTypeApplicationData, cipherMsg)
+	serverData.BuffSendData(ContentTypeHandshake, verifyDataMsg)
 	serverData.sendData(serverData.wBuff)
 
 }
@@ -1052,8 +1060,8 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 		if err != nil {
 			return fmt.Errorf("\n problem loading certificate: %V", err)
 		}
-		cert = append(cert, byte(22))
-		cipherMsg, err := encryptRecord(writeSecret, ivKey, cert, 1)
+		// cert = append(cert, byte(22))
+		// cipherMsg, err := encryptRecord(writeSecret, ivKey, cert, 1)
 
 		// serverData.conn.Write(encryptesExtMsg)
 		// //   opaque_type:  The outer opaque_type field of a TLSCiphertext record
@@ -1065,7 +1073,7 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 		// TODO: tls1.3 encrypt the data
 		fmt.Println("Cert")
 		fmt.Println(cert)
-		serverData.BuffSendData(ContentTypeApplicationData, cipherMsg)
+		serverData.BuffSendData(ContentTypeHandshake, cert)
 		serverData.sendData(serverData.wBuff)
 
 		serverData.CertVerify()
@@ -1738,6 +1746,7 @@ func (serverData *ServerData) serverHello() error {
 	if binary.BigEndian.Uint16(serverData.Version) == 0x0304 {
 		serverData.derive()
 	}
+	serverData.IsServerEncrypted = true
 
 	return err
 }
