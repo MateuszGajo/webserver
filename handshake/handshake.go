@@ -7,7 +7,6 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha1"
-	"crypto/sha512"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -21,8 +20,6 @@ import (
 	"handshakeServer/cipher"
 	"handshakeServer/helpers"
 
-	"github.com/keys-pub/keys"
-	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/hkdf"
 )
 
@@ -153,6 +150,45 @@ type HeartBeatMessageType byte
 const (
 	HeartBeatMessageTypeRequest  HeartBeatMessageType = 1
 	HeartBeatMessageTypeResponse HeartBeatMessageType = 2
+)
+
+// enum {
+// 	/* RSASSA-PKCS1-v1_5 algorithms */
+// 	rsa_pkcs1_sha256(0x0401),
+// 	rsa_pkcs1_sha384(0x0501),
+// 	rsa_pkcs1_sha512(0x0601),
+
+// 	/* ECDSA algorithms */
+// 	ecdsa_secp256r1_sha256(0x0403),
+// 	ecdsa_secp384r1_sha384(0x0503),
+// 	ecdsa_secp521r1_sha512(0x0603),
+
+// 	/* RSASSA-PSS algorithms with public key OID rsaEncryption */
+// 	rsa_pss_rsae_sha256(0x0804),
+// 	rsa_pss_rsae_sha384(0x0805),
+// 	rsa_pss_rsae_sha512(0x0806),
+
+// 	/* EdDSA algorithms */
+// 	ed25519(0x0807),
+// 	ed448(0x0808),
+
+// 	/* RSASSA-PSS algorithms with public key OID RSASSA-PSS */
+// 	rsa_pss_pss_sha256(0x0809),
+// 	rsa_pss_pss_sha384(0x080a),
+// 	rsa_pss_pss_sha512(0x080b),
+
+// 	/* Legacy algorithms */
+// 	rsa_pkcs1_sha1(0x0201),
+// 	ecdsa_sha1(0x0203),
+
+// } SignatureScheme;
+
+// TODO: fill it
+
+type SignatureScheme int
+
+const (
+	SignatureSchemeRsaPssRsaeSha256 SignatureScheme = 0x0804
 )
 
 // enum {
@@ -647,10 +683,9 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 
 	msg := []byte{byte(contentType)}
 
-	msg = append(msg, []byte{3, 3}...)
+	msg = append(msg, serverData.tls13.legacyRecordVersion...)
 
 	msg = append(msg, helpers.Int32ToBigEndian(len(content))...)
-	// msg = append(msg, []byte{0, 122}...)
 	msg = append(msg, content...)
 
 	serverData.wBuff = append(serverData.wBuff, msg...)
@@ -708,6 +743,7 @@ func (serverData *ServerData) handleLiveConnection() {
 
 }
 
+// TODO: remove hardcoded data, move to cipher
 func encryptRecord(clientWriteKey, clientWriteIV, plaintext []byte, sequenceNumber uint64) ([]byte, error) {
 	ivLength := len(clientWriteIV)
 
@@ -769,13 +805,9 @@ func (serverData *ServerData) encryptedExtensions() {
 func (serverData *ServerData) CertVerify() error {
 
 	// 	The digital signature is then computed over the concatenation of:
-
 	//    -  A string that consists of octet 32 (0x20) repeated 64 times
-
 	//    -  The context string
-
 	//    -  A single 0 byte which serves as the separator
-
 	//    -  The content to be signed - basically hadnshake messages Transcript-Hash(Handshake Context, Certificate)
 
 	OctetLength := 64
@@ -793,11 +825,10 @@ func (serverData *ServerData) CertVerify() error {
 	signatureData = append(signatureData, []byte(serverContext)...)
 	signatureData = append(signatureData, SeparatorByte)
 
-	sha := sha512.New384()
-	sha.Write(serverData.HandshakeMessages)
-	hash := sha.Sum(nil)
-	signatureData = append(signatureData, hash...)
+	hashFunc := serverData.CipherDef.Spec.HashAlgorithm()
+	hashFunc.Write(serverData.HandshakeMessages)
 
+	signatureData = append(signatureData, hashFunc.Sum(nil)...)
 	signature, err := serverData.CipherDef.TLS13SignData(signatureData)
 
 	if err != nil {
@@ -805,7 +836,7 @@ func (serverData *ServerData) CertVerify() error {
 		return fmt.Errorf("problem signing data, err: %v", err)
 	}
 
-	algorithm := []byte{8, 4} // TODO: tls1.3
+	algorithm := helpers.Int32ToBigEndian(int(SignatureSchemeRsaPssRsaeSha256)) // TODO: tls1.3
 	cerificateVerifySignatureLength := helpers.Int32ToBigEndian(len(signature))
 
 	msg := algorithm
@@ -828,49 +859,35 @@ func (serverData *ServerData) CertVerify() error {
 	return nil
 }
 
-func HMAC(key, message []byte) []byte {
-	h := hmac.New(sha512.New384, key)
+func HMAC(hashFunc func() hash.Hash, key, message []byte, size int) []byte {
+	h := hmac.New(hashFunc, key)
 
 	h.Write(message)
 
-	return h.Sum(nil)
+	return h.Sum(nil)[:size]
 }
 
-func (serverData *ServerData) finishMsg() {
+func (serverData *ServerData) finishMsg() error {
 
-	finish_key, err := serverData.HKDFExpandLabel(serverData.tls13.serverHandshakeSecret, []byte("finished"), []byte(""), serverData.CipherDef.Spec.HashSize)
+	finishKey, err := serverData.HKDFExpandLabel(serverData.tls13.serverHandshakeSecret, []byte("finished"), []byte(""), serverData.CipherDef.Spec.HashSize)
 
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("problem calculating finish key, err: %v", finishKey)
 	}
 
-	sha := sha512.New384()
+	hashFunc := serverData.CipherDef.Spec.HashAlgorithm()
+	hashFunc.Write(serverData.HandshakeMessages)
 
-	sha.Write(serverData.HandshakeMessages)
-	transcriptHash := sha.Sum(nil)
-	verifyData := HMAC(finish_key, transcriptHash)[:serverData.CipherDef.Spec.HashSize]
+	verifyData := HMAC(serverData.CipherDef.Spec.HashAlgorithm, finishKey, hashFunc.Sum(nil), serverData.CipherDef.Spec.HashSize)
+	verifyDataLength, _ := helpers.IntTo3BytesBigEndian(len(verifyData))
 
 	verifyDataMsg := []byte{byte(HandshakeMessageFinished)}
-	verifyDataLength, _ := helpers.IntTo3BytesBigEndian(len(verifyData))
 	verifyDataMsg = append(verifyDataMsg, verifyDataLength...)
 	verifyDataMsg = append(verifyDataMsg, verifyData...)
-	// verifyDataMsg = append(verifyDataMsg, 22)
 
-	// fmt.Println("verify Data msg")
-	// fmt.Println(verifyDataMsg)
-
-	// cipherMsg, _ := encryptRecord(writeSecret, ivKey, verifyDataMsg, 3)
-
-	// serverData.conn.Write(encryptesExtMsg)
-	// //   opaque_type:  The outer opaque_type field of a TLSCiphertext record
-	// is always set to the value 23 (application_data) for outward
-	// compatibility with middleboxes accustomed to parsing previous
-	// versions of TLS.  The actual content type of the record is found
-	// in TLSInnerPlaintext.type after decryption.
-
-	// TODO: tls1.3 encrypt the data
-	fmt.Println("verify Data")
 	serverData.BuffSendData(ContentTypeHandshake, verifyDataMsg)
+
+	return nil
 
 }
 
@@ -879,12 +896,17 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 	handshakeMessageType := HandshakeMessageType(contentData[0])
 	var err error
 	if handshakeMessageType == HandshakeMessageClientHello {
+
 		if err = serverData.handleHandshakeClientHello(contentData); err != nil {
 			return fmt.Errorf("\n Problem handling client hello: %v", err)
 		}
+		serverData.calculateEarlySecret()
+
 		if err = serverData.serverHello(); err != nil {
 			return fmt.Errorf("\n problem with serverHello msg : %v", err)
 		}
+
+		serverData.calculateHandshakeSecret()
 
 		// if _, err = serverData.sendData(serverData.wBuff); err != nil {
 		// 	return err
@@ -1403,6 +1425,8 @@ func (serverData *ServerData) calculateHandshakeSecret() error {
 	}
 	serverData.tls13.serverHandshakeSecret = serverHandshakeSecret
 
+	serverData.calculateEncryptionKeys()
+
 	return nil
 }
 
@@ -1425,16 +1449,6 @@ func (serverData *ServerData) calculateEncryptionKeys() error {
 	return nil
 }
 
-func (serverData *ServerData) derive() error {
-
-	serverData.calculateEarlySecret()
-	serverData.calculateHandshakeSecret()
-	serverData.calculateEncryptionKeys()
-
-	return nil
-
-}
-
 func (serverData *ServerData) serverHello() error {
 
 	currentTime := time.Now()
@@ -1442,6 +1456,8 @@ func (serverData *ServerData) serverHello() error {
 
 	unitTimeBytes := helpers.Int64ToBIgEndian(unixTime)
 	randomBytes := make([]byte, RandomBytesLength-len(unitTimeBytes))
+	serverData.ServerRandom = unitTimeBytes
+	serverData.ServerRandom = append(serverData.ServerRandom, randomBytes...)
 
 	_, err := rand.Read(randomBytes)
 
@@ -1450,10 +1466,8 @@ func (serverData *ServerData) serverHello() error {
 		return fmt.Errorf("problem generating random bytes, err:%v", err)
 	}
 
-	// cipherSuite := helpers.Int32ToBigEndian(int(serverData.CipherDef.CipherSuite))
-	cipherSuite := []byte{19, 2}
-	// compressionMethod := []byte{byte(serverData.CipherDef.Spec.CompressionMethod)}
-	compressionMethod := []byte{0}
+	cipherSuite := helpers.Int32ToBigEndian(int(serverData.CipherDef.CipherSuite))
+	compressionMethod := []byte{byte(serverData.CipherDef.Spec.CompressionMethod)}
 	protocolVersion := serverData.Version
 
 	session := []byte{}
@@ -1475,91 +1489,49 @@ func (serverData *ServerData) serverHello() error {
 		}
 
 	}
-	ext := []byte{}
+	extenstionMsg := []byte{}
 
 	if binary.BigEndian.Uint16(serverData.Version) == 0x0304 {
-		keyShareExt := []byte{0, 51, 0, 36, 0, 29, 0, 32}
-		if *serverData.CipherDef.DhParams.Group == cipher.DhGroupX25519 {
-			// TODO: this should me move to cipher, i guess
-			key := keys.GenerateX25519Key()
-			privateKey := key.Private()
-			pubKey := key.Public()
+		// TODO: maybe construct an array e.g [ ExtenstionTypeKeyShare, ExtenstionTypeSupportedVersions] and foor loop it, it will be version idependent, we will defined what should be used somewhere else
+		keyShareExt, err := serverData.ConstructExtenstion(ExtenstionTypeKeyShare)
 
-			sharedSecret, _ := curve25519.X25519(privateKey, keyShare)
-			serverData.CipherDef.ECDH.SharedSecret = sharedSecret
-
-			keyShareExt = append(keyShareExt, pubKey...)
-
+		if err != nil {
+			return err
 		}
 
-		versionExt := []byte{0, 46, 0, 43, 0, 2, 3, 4}
-		extLength := helpers.Int32ToBigEndian(len(keyShareExt) + len(versionExt))
+		versionMsg, err := serverData.ConstructExtenstion(ExtenstionTypeSupportedVersions)
+		if err != nil {
+			return err
+		}
+		extensions := versionMsg
+		extensions = append(extensions, keyShareExt...)
+		extensionsLength := helpers.Int32ToBigEndian(len(extensions))
 
-		fmt.Println(extLength)
-		ext = append(ext, versionExt...)
-		ext = append(ext, keyShareExt...)
-
-		// Encrypted Extensions
-
-		// In all handshakes, the server MUST send the EncryptedExtensions
-		// message immediately after the ServerHello message.  This is the first
-		// message that is encrypted under keys derived from the
-		// server_handshake_traffic_secret.
-
-		// The EncryptedExtensions message contains extensions that can be
-		// protected, i.e., any which are not needed to establish the
-		// cryptographic context but which are not associated with individual
-		// certificates.  The client MUST check EncryptedExtensions for the
-		// presence of any forbidden extensions and if any are found MUST abort
-		// the handshake with an "illegal_parameter" alert.
-
-		// Structure of this message:
-
-		//    struct {
-		// 	   Extension extensions<0..2^16-1>;
-		//    } EncryptedExtensions;
-
-		// extensions:  A list of extensions.  For more information, see the
-		//    table in Section 4.2.
-
+		extenstionMsg = extensionsLength
+		extenstionMsg = append(extenstionMsg, extensions...)
 	}
 
-	handshakeLength := len(unitTimeBytes) + len(randomBytes) + len(sessionLength) + len(session) + len(cipherSuite) + len(compressionMethod) + len(protocolVersion) + len(ext)
+	handshakeLength := len(unitTimeBytes) + len(randomBytes) + len(sessionLength) + len(session) + len(cipherSuite) + len(compressionMethod) + len(protocolVersion) + len(extenstionMsg)
 	// handshakeLength := len(unitTimeBytes) + len(randomBytes) + len(sessionLength) + len(session) + len(protocolVersion) + len(ext)
 	handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(handshakeLength)
 
 	if err != nil {
 		return fmt.Errorf("error converting int to big endian: %v", err)
 	}
-	// serverHello := []byte{22, 3, 3, 0, 122}
 
 	serverHello := []byte{byte(HandshakeMessageServerHello)}
-	// 22, 3, 3, 0, 122,
-	// serverHello = append(serverHello, []byte{0, 0, 118}...)
-	// serverHello = append(serverHello, []byte{0, 0, 118}...)
 	serverHello = append(serverHello, handshakeLengthByte...)
-	serverHello = append(serverHello, []byte{3, 3}...)
-	// serverHello = append(serverHello, protocolVersion...)
+	serverHello = append(serverHello, serverData.tls13.legacyRecordVersion...)
 	serverHello = append(serverHello, unitTimeBytes...)
 	serverHello = append(serverHello, randomBytes...)
 	serverHello = append(serverHello, sessionLength...)
 	serverHello = append(serverHello, session...)
 	serverHello = append(serverHello, cipherSuite...)
 	serverHello = append(serverHello, compressionMethod...)
-	serverHello = append(serverHello, ext...)
-	fmt.Println("Server hello, cipher suite")
-	fmt.Println(cipherSuite)
-	fmt.Println(serverData.CipherDef.Spec.HashAlgorithm)
-	fmt.Println(serverHello)
-
-	serverData.ServerRandom = unitTimeBytes
-	serverData.ServerRandom = append(serverData.ServerRandom, randomBytes...)
+	serverHello = append(serverHello, extenstionMsg...)
 
 	err = serverData.BuffSendData(ContentTypeHandshake, serverHello)
 
-	if binary.BigEndian.Uint16(serverData.Version) == 0x0304 {
-		serverData.derive()
-	}
 	serverData.IsServerEncrypted = true
 
 	return err
