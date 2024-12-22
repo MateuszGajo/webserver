@@ -7,7 +7,6 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha1"
-	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/binary"
 	"errors"
@@ -307,17 +306,7 @@ func (serverData *ServerData) generateStreamCipher(dataCompressedType, sslCompre
 }
 
 func (serverData *ServerData) verifyMac(contentType byte, contentData []byte) ([]byte, error) {
-	var macSize int
-	switch serverData.CipherDef.Spec.HashAlgorithm {
-	case cipher.HashAlgorithmMD5:
-		macSize = md5.New().Size()
-	case cipher.HashAlgorithmSHA:
-		macSize = sha1.New().Size()
-	case cipher.HashAlgorithmSHA256:
-		macSize = sha256.New().Size()
-	default:
-		panic("wrong algorithm used can't use: " + serverData.CipherDef.Spec.HashAlgorithm)
-	}
+	var macSize int = serverData.CipherDef.Spec.HashAlgorithm().Size()
 
 	macSent := contentData[len(contentData)-macSize:]
 
@@ -596,7 +585,7 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 
 			data = append(data, byte(22))
 
-			encryptedMsg, err = encryptRecord(writeSecret, ivKey, data, binary.BigEndian.Uint64(serverData.ServerSeqNum))
+			encryptedMsg, err = encryptRecord(serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient, data, binary.BigEndian.Uint64(serverData.ServerSeqNum))
 			if err != nil {
 				serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionDecryptError)
 				return err
@@ -777,10 +766,6 @@ func (serverData *ServerData) encryptedExtensions() {
 	serverData.sendData(serverData.wBuff)
 }
 
-var writeSecret []byte
-var handshakesecret []byte
-var ivKey []byte
-
 func (serverData *ServerData) CertVerify() error {
 
 	// 	The digital signature is then computed over the concatenation of:
@@ -852,9 +837,8 @@ func HMAC(key, message []byte) []byte {
 }
 
 func (serverData *ServerData) finishMsg() {
-	handshakeSecret := handshakesecret
 
-	finish_key, err := serverData.HKDFExpandLabel(handshakeSecret, []byte("finished"), []byte(""), 48)
+	finish_key, err := serverData.HKDFExpandLabel(serverData.tls13.serverHandshakeSecret, []byte("finished"), []byte(""), serverData.CipherDef.Spec.HashSize)
 
 	if err != nil {
 		panic(err)
@@ -1362,15 +1346,6 @@ func (serverData *ServerData) getServerKeyExchange() ([]byte, error) {
 //                               Transcript-Hash(Messages), Hash.length)
 
 func (serverData *ServerData) HKDFExpandLabel(secret, label, context []byte, length int) ([]byte, error) {
-	// TLS 1.3 uses SHA256 for the HMAC function
-	hash := sha1.New
-
-	switch serverData.CipherDef.Spec.HashAlgorithm {
-	case cipher.HashAlgorithmSHA384:
-		hash = sha512.New384
-	default:
-		panic("hash function not implemneted")
-	}
 
 	// Create the HKDF instance
 	combinedLabel := []byte("tls13 ")
@@ -1383,7 +1358,7 @@ func (serverData *ServerData) HKDFExpandLabel(secret, label, context []byte, len
 	info = append(info, byte(len(context)))
 	info = append(info, context...)
 
-	hkdf1 := hkdf.Expand(hash, secret, info)
+	hkdf1 := hkdf.Expand(serverData.CipherDef.Spec.HashAlgorithm, secret, info)
 
 	output := make([]byte, length)
 
@@ -1397,14 +1372,7 @@ func (serverData *ServerData) HKDFExpandLabel(secret, label, context []byte, len
 
 func (serverData *ServerData) DeriveSecret(Secret, Label, Messages []byte) ([]byte, error) {
 
-	hashFunc := sha1.New()
-
-	switch serverData.CipherDef.Spec.HashAlgorithm {
-	case cipher.HashAlgorithmSHA384:
-		hashFunc = sha512.New384()
-	default:
-		panic("hash function not implemneted")
-	}
+	hashFunc := serverData.CipherDef.Spec.HashAlgorithm()
 
 	hashFunc.Write(Messages)
 	res := hashFunc.Sum(nil)
@@ -1412,61 +1380,58 @@ func (serverData *ServerData) DeriveSecret(Secret, Label, Messages []byte) ([]by
 	return serverData.HKDFExpandLabel(Secret, Label, res, serverData.CipherDef.Spec.HashSize)
 }
 
-var serverHelloSecret []byte
+func (serverData *ServerData) calculateEarlySecret() error {
+	earlySecret := hkdf.Extract(serverData.CipherDef.Spec.HashAlgorithm, make([]byte, serverData.CipherDef.Spec.HashSize), []byte{})
 
-func (serverData *ServerData) derive() {
-	hash := sha1.New
-
-	switch serverData.CipherDef.Spec.HashAlgorithm {
-	case cipher.HashAlgorithmSHA384:
-		hash = sha512.New384
-	default:
-		panic("hash function not implemneted")
-	}
-
-	arr := make([]byte, serverData.CipherDef.Spec.HashSize)
-	earlySecret := hkdf.Extract(hash, arr, []byte{})
-
-	//     Derive-Secret(., "derived", "")
-	aa, err := serverData.DeriveSecret(earlySecret, []byte("derived"), []byte(""))
-
-	derivedSecret := hkdf.Extract(hash, serverHelloSecret, aa)
-
-	fmt.Println("lets see dervied keys, secret")
-	fmt.Println(aa)
-	fmt.Println("and key")
-	fmt.Println(derivedSecret)
-	//
-
-	//             +-----> Derive-Secret(., "s hs traffic",
-	// |                     ClientHello...ServerHello)
-	// |                     = server_handshake_traffic_secret
-
-	handshakeSecretKey, err := serverData.DeriveSecret(derivedSecret, []byte("s hs traffic"), serverData.HandshakeMessages)
-
-	// handshakeSecret := hkdf.Extract(hash, serverHelloSecret, bb)
-	//
-
-	fmt.Println("lets see HAndshake~~!!!!!!!!!!!!!!!111, secret")
-	fmt.Println(handshakeSecretKey)
-	handshakesecret = handshakeSecretKey
-	// fmt.Println("and key")
-	// fmt.Println(handshakeSecret)
-
+	derivedSecret, err := serverData.DeriveSecret(earlySecret, []byte("derived"), []byte(""))
 	if err != nil {
-		panic(err)
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
+		return fmt.Errorf("problem deriving secret from early secret, err: %v", err)
+	}
+	serverData.tls13.deriveSecret = derivedSecret
+	return nil
+
+}
+
+func (serverData *ServerData) calculateHandshakeSecret() error {
+	handshakeSecret := hkdf.Extract(serverData.CipherDef.Spec.HashAlgorithm, serverData.CipherDef.ECDH.SharedSecret, serverData.tls13.deriveSecret)
+
+	serverHandshakeSecret, err := serverData.DeriveSecret(handshakeSecret, []byte("s hs traffic"), serverData.HandshakeMessages)
+	if err != nil {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
+		return fmt.Errorf("problem deriving handshake secret, err: %v", err)
+	}
+	serverData.tls13.serverHandshakeSecret = serverHandshakeSecret
+
+	return nil
+}
+
+func (serverData *ServerData) calculateEncryptionKeys() error {
+	writeKey, err := serverData.HKDFExpandLabel(serverData.tls13.serverHandshakeSecret, []byte("key"), []byte(""), serverData.CipherDef.Spec.KeyMaterial)
+	if err != nil {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
+		return fmt.Errorf("problem while calcualting write key, err: %v", err)
 	}
 
-	write_key, err := serverData.HKDFExpandLabel(handshakeSecretKey, []byte("key"), []byte(""), 32)
-	iv_key, err := serverData.HKDFExpandLabel(handshakeSecretKey, []byte("iv"), []byte(""), 12)
+	ivKey, err := serverData.HKDFExpandLabel(serverData.tls13.serverHandshakeSecret, []byte("iv"), []byte(""), serverData.CipherDef.Spec.IvSize)
+	if err != nil {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
+		return fmt.Errorf("problem while calcualting iv, err: %v", err)
+	}
 
-	fmt.Println("hello write key is:")
-	fmt.Println(write_key)
-	fmt.Println("hello iv is")
-	fmt.Println(iv_key)
+	serverData.CipherDef.Keys.IVClient = ivKey
+	serverData.CipherDef.Keys.WriteKeyClient = writeKey
 
-	writeSecret = write_key
-	ivKey = iv_key
+	return nil
+}
+
+func (serverData *ServerData) derive() error {
+
+	serverData.calculateEarlySecret()
+	serverData.calculateHandshakeSecret()
+	serverData.calculateEncryptionKeys()
+
+	return nil
 
 }
 
@@ -1515,19 +1480,13 @@ func (serverData *ServerData) serverHello() error {
 	if binary.BigEndian.Uint16(serverData.Version) == 0x0304 {
 		keyShareExt := []byte{0, 51, 0, 36, 0, 29, 0, 32}
 		if *serverData.CipherDef.DhParams.Group == cipher.DhGroupX25519 {
+			// TODO: this should me move to cipher, i guess
 			key := keys.GenerateX25519Key()
 			privateKey := key.Private()
 			pubKey := key.Public()
 
-			fmt.Println("we are using for sharedSecret1 ")
-			fmt.Println("priv key")
-			fmt.Println(privateKey)
-			fmt.Println("and pub key")
-			fmt.Println(keyShare)
-			sharedSecret1, _ := curve25519.X25519(privateKey, keyShare)
-			fmt.Println("Shared secret:", sharedSecret1)
-			serverHelloSecret = sharedSecret1
-			fmt.Println("this should be right")
+			sharedSecret, _ := curve25519.X25519(privateKey, keyShare)
+			serverData.CipherDef.ECDH.SharedSecret = sharedSecret
 
 			keyShareExt = append(keyShareExt, pubKey...)
 

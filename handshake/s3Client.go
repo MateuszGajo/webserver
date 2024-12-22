@@ -138,18 +138,7 @@ func (serverData *ServerData) S3generateStreamCipher(dataCompressedType, sslComp
 	// 			  SSLCompressed.type + SSLCompressed.length +
 	// 			  SSLCompressed.fragment));
 	var nPad int
-	var hashFunc hash.Hash
-
-	switch serverData.CipherDef.Spec.HashAlgorithm {
-	case cipher.HashAlgorithmMD5:
-		nPad = 48
-		hashFunc = md5.New()
-	case cipher.HashAlgorithmSHA:
-		nPad = 40
-		hashFunc = sha1.New()
-	default:
-		panic("wrong algorithm used can't use: " + serverData.CipherDef.Spec.HashAlgorithm)
-	}
+	var hashFunc = serverData.CipherDef.Spec.HashAlgorithm()
 
 	ssl3Pad1Sha := pad1[:nPad]
 	ssl3Pad2Sha := pad2[:nPad]

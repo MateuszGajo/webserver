@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/dsa"
+	"crypto/md5"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/asn1"
 	"encoding/binary"
 	"fmt"
+	"hash"
 	"math/big"
 	"os"
 	"strings"
@@ -98,7 +102,7 @@ type CipherSpec struct {
 	IvSize                     int
 	IvAsPayload                bool
 	HashBasedSigning           bool
-	HashAlgorithm              HashAlgorithm
+	HashAlgorithm              func() hash.Hash
 	ExtHashAlgorithmIdentifier HashAlgorithmIdentifier
 	KeyExchange                KeyExchangeMethod
 	// Use this paramter when using DHE key exchange, as dh has almost the same implementation to dhe
@@ -116,9 +120,15 @@ type CipherDef struct {
 	Spec               CipherSpec
 	CipherSuite        uint16
 	DhParams           DhParams
+	ECDH               ECDHData
 	Rsa                RsaCipher
 	Dsa                DsaCipher
 	PreferServerCipher bool
+}
+
+type ECDHData struct {
+	// The ECDH shared secret is the result of applying the ECDH scalar	multiplication function to the secret key (into scalar input) and the peer's public key (into u-coordinate point input).  The output is used raw, with no processing.
+	SharedSecret []byte
 }
 
 type RsaCipher struct {
@@ -722,7 +732,9 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 			cipherDef.Spec.ExportKeyMaterial = 16
 		case "256":
 		case "GCM":
-			//backward compability
+			// "For IVs, it is recommended that implementations restrict support to the length of 96 bits, to promote interoperability, efficiency, and simplicity of design"
+			// https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf?utm_source=chatgpt.com
+			cipherDef.Spec.IvSize = 12
 		default:
 			fmt.Printf("\n encryption param not implemented %v", param)
 			os.Exit(1)
@@ -746,15 +758,10 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmAES
 	case "AES_128_GCM":
 
-		// TLS1.3: todo
-		cipherDef.Spec.IvSize = 16
 		cipherDef.Spec.KeyMaterial = 16
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmAES
 	case "AES_256_GCM":
-
-		// TLS1.3: todo
-		cipherDef.Spec.IvSize = 16
-		cipherDef.Spec.KeyMaterial = 16
+		cipherDef.Spec.KeyMaterial = 32
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmAES
 	case "AES_256_CBC":
 		cipherDef.Spec.IvSize = 16
@@ -763,19 +770,19 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 	}
 	switch hashingMethod {
 	case "SHA":
-		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA
+		cipherDef.Spec.HashAlgorithm = sha1.New
 		cipherDef.Spec.HashSize = 20
 		cipherDef.Spec.ExtHashAlgorithmIdentifier = HashAlgorithmNumberSha1
 	case "MD5":
-		cipherDef.Spec.HashAlgorithm = HashAlgorithmMD5
+		cipherDef.Spec.HashAlgorithm = md5.New
 		cipherDef.Spec.ExtHashAlgorithmIdentifier = HashAlgorithmNumberMd5
 		cipherDef.Spec.HashSize = 16
 	case "SHA256":
-		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA256
+		cipherDef.Spec.HashAlgorithm = sha256.New
 		cipherDef.Spec.HashSize = 32
 		cipherDef.Spec.ExtHashAlgorithmIdentifier = HashAlgorithmNumberSha256
 	case "SHA384":
-		cipherDef.Spec.HashAlgorithm = HashAlgorithmSHA384
+		cipherDef.Spec.HashAlgorithm = sha512.New384
 		cipherDef.Spec.HashSize = 48
 		cipherDef.Spec.ExtHashAlgorithmIdentifier = HashAlgorithmNumberSha384
 	default:

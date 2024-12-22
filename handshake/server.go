@@ -32,6 +32,11 @@ type ExtHeartBeat struct {
 	lastPayload []byte
 }
 
+type ServerDataTLS13 struct {
+	serverHandshakeSecret []byte
+	deriveSecret          []byte
+}
+
 type ServerData struct {
 	IsClientEncrypted bool
 	IsServerEncrypted bool
@@ -50,6 +55,7 @@ type ServerData struct {
 	session           []byte
 	reuseSession      bool
 	extHeartBeat      *ExtHeartBeat
+	tls13             ServerDataTLS13
 }
 
 type HttpServerOptions func(s *HttpServer)
@@ -112,7 +118,7 @@ func (httpServer *HttpServer) startHttpServer() {
 	defer httpServer.Wg.Done()
 	for {
 
-		serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, Version: httpServer.Version, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: cipher.CipherDef{}}
+		serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, Version: httpServer.Version, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: cipher.CipherDef{}, tls13: ServerDataTLS13{}}
 
 		if (httpServer.CertParam) != nil {
 
