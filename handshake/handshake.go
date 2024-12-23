@@ -2,7 +2,6 @@ package handshake
 
 //
 import (
-	"crypto/aes"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/rand"
@@ -16,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	cipher1 "crypto/cipher"
 	"handshakeServer/cipher"
 	"handshakeServer/helpers"
 
@@ -492,7 +490,7 @@ func (serverData *ServerData) handleAlert(contentData []byte) {
 	}
 }
 
-func (serverData *ServerData) loadCertificate() (error, []byte) {
+func (serverData *ServerData) loadCertificate() error {
 
 	// handshakeLengthByte, err := helpers.IntTo3BytesBigEndian(len(serverData.cert) + 3 + 3)
 	// if err != nil {
@@ -547,7 +545,7 @@ func (serverData *ServerData) loadCertificate() (error, []byte) {
 	certLength, err := helpers.IntTo3BytesBigEndian(len(serverData.cert))
 	if err != nil {
 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
-		return errors.New("problem converting cert length to big endian"), nil
+		return errors.New("problem converting cert length to big endian")
 	}
 
 	certificateEntryCertData := certLength
@@ -559,7 +557,7 @@ func (serverData *ServerData) loadCertificate() (error, []byte) {
 
 	if err != nil {
 		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionInternalError)
-		return errors.New("problem converting certificate entry length length to big endian"), nil
+		return errors.New("problem converting certificate entry length length to big endian")
 	}
 
 	certificateRequestContentData := []byte{}
@@ -576,9 +574,9 @@ func (serverData *ServerData) loadCertificate() (error, []byte) {
 	handshakeCertificateMsg = append(handshakeCertificateMsg, certMsgLength...)
 	handshakeCertificateMsg = append(handshakeCertificateMsg, certMsg...)
 
-	// serverData.HandshakeMessages = append(serverData.HandshakeMessages, handshakeCertificateMsg)
+	serverData.BuffSendData(ContentTypeHandshake, handshakeCertificateMsg)
 
-	return err, handshakeCertificateMsg
+	return err
 
 }
 
@@ -621,7 +619,13 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 
 			data = append(data, byte(22))
 
-			encryptedMsg, err = encryptRecord(serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient, data, binary.BigEndian.Uint64(serverData.ServerSeqNum))
+			additionalData := []byte{byte(ContentTypeApplicationData)}
+			additionalData = append(additionalData, serverData.tls13.legacyRecordVersion...)
+			additionalDataLength := helpers.Int32ToBigEndian(len(data) + 16) // gcm tag size)
+			additionalData = append(additionalData, additionalDataLength...)
+
+			encryptedMsg, err = serverData.CipherDef.EncryptMessage(data, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer, serverData.ServerSeqNum, additionalData)
+
 			if err != nil {
 				serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionDecryptError)
 				return err
@@ -662,7 +666,7 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 			dataWithMac = append(dataWithMac, data...)
 			dataWithMac = append(dataWithMac, mac...)
 
-			encryptedMsg, err = serverData.CipherDef.EncryptMessage(dataWithMac, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer)
+			encryptedMsg, err = serverData.CipherDef.EncryptMessage(dataWithMac, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer, serverData.ServerSeqNum, nil)
 
 			if err != nil {
 				serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionBadRecordMac)
@@ -741,46 +745,6 @@ func (serverData *ServerData) handleLiveConnection() {
 		}
 	}
 
-}
-
-// TODO: remove hardcoded data, move to cipher
-func encryptRecord(clientWriteKey, clientWriteIV, plaintext []byte, sequenceNumber uint64) ([]byte, error) {
-	ivLength := len(clientWriteIV)
-
-	// if sequenceNumber > maxSeqNum {
-	// 	return nil, fmt.Errorf("sequence number exceeded limit")
-	// }
-
-	// Derive per-record nonce
-	perRecordNonce := make([]byte, 12)
-	seqNumBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(seqNumBytes, sequenceNumber)
-	copy(perRecordNonce[ivLength-8:], seqNumBytes) // Pad to ivLength
-	for i := 0; i < len(clientWriteIV); i++ {
-		perRecordNonce[i] ^= clientWriteIV[i]
-	}
-
-	// Create AES-GCM cipher
-	block, err := aes.NewCipher(clientWriteKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create cipher: %v", err)
-	}
-	aesGCM, err := cipher1.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create GCM: %v", err)
-	}
-
-	// Construct additional data
-	// TLSCiphertext.opaque_type || TLSCiphertext.legacy_record_version || TLSCiphertext.length
-	additionalData := make([]byte, 5)
-	additionalData[0] = byte(ContentTypeApplicationData)    // opaque_type
-	binary.BigEndian.PutUint16(additionalData[1:3], 0x0303) // legacy_record_version
-	binary.BigEndian.PutUint16(additionalData[3:], uint16(len(plaintext)+aesGCM.Overhead()))
-
-	// Encrypt the plaintext
-	ciphertext := aesGCM.Seal(nil, perRecordNonce, plaintext, additionalData)
-
-	return ciphertext, nil
 }
 
 func (serverData *ServerData) encryptedExtensions() {
@@ -908,49 +872,24 @@ func (serverData *ServerData) handleHandshake(contentData []byte) error {
 
 		serverData.calculateHandshakeSecret()
 
-		// if _, err = serverData.sendData(serverData.wBuff); err != nil {
-		// 	return err
-		// }
 		if err = serverData.changeCipher(); err != nil {
 			return fmt.Errorf("problem with changing cipher, err: %v", err)
 		}
-		// if _, err = serverData.sendData(serverData.wBuff); err != nil {
-		// 	return err
-		// }
-		// serverData.conn.Write([]byte{20, 3, 3, 0, 1, 1})
+
 		serverData.encryptedExtensions()
 
 		// if serverData.CipherDef.Spec.SignatureAlgorithm != cipher.SignatureAlgorithmAnonymous {
-		err, cert := serverData.loadCertificate()
+		err := serverData.loadCertificate()
 		if err != nil {
 			return fmt.Errorf("\n problem loading certificate: %V", err)
 		}
-		// cert = append(cert, byte(22))
-		// cipherMsg, err := encryptRecord(writeSecret, ivKey, cert, 1)
-
-		// serverData.conn.Write(encryptesExtMsg)
-		// //   opaque_type:  The outer opaque_type field of a TLSCiphertext record
-		// is always set to the value 23 (application_data) for outward
-		// compatibility with middleboxes accustomed to parsing previous
-		// versions of TLS.  The actual content type of the record is found
-		// in TLSInnerPlaintext.type after decryption.
-
-		// TODO: tls1.3 encrypt the data
-		fmt.Println("Cert")
-		fmt.Println(cert)
-		serverData.BuffSendData(ContentTypeHandshake, cert)
-		// serverData.sendData(serverData.wBuff)
 
 		serverData.CertVerify()
 
 		serverData.finishMsg()
 
 		serverData.sendData(serverData.wBuff)
-		// }
-		// fmt.Println("Cert")
-		// fmt.Println(cipherMsg)
-		// serverData.conn.Write(cert)
-		// serverData.conn.Write([]byte{23, 3, 3, 0, 23, 31, 116, 98, 167, 200, 71, 1, 101, 157, 208, 244, 116, 202, 90, 229, 171, 63, 161, 79, 3, 160, 248, 124})
+
 		return err
 
 		// if serverData.reuseSession {
@@ -1443,8 +1382,8 @@ func (serverData *ServerData) calculateEncryptionKeys() error {
 		return fmt.Errorf("problem while calcualting iv, err: %v", err)
 	}
 
-	serverData.CipherDef.Keys.IVClient = ivKey
-	serverData.CipherDef.Keys.WriteKeyClient = writeKey
+	serverData.CipherDef.Keys.IVServer = ivKey
+	serverData.CipherDef.Keys.WriteKeyServer = writeKey
 
 	return nil
 }

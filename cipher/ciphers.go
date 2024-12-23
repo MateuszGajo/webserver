@@ -59,6 +59,12 @@ const (
 	EncryptionAlgorithmFortezza EncryptionAlgorithm = "FORTEZZA"
 )
 
+type EncryptionAlgorithmBlockMode string
+
+const (
+	EncryptionAlgorithmBlockModeGCM EncryptionAlgorithmBlockMode = "GCM"
+)
+
 type SignatureAlgorithm string
 
 const (
@@ -108,6 +114,7 @@ type CipherSpec struct {
 	// Use this paramter when using DHE key exchange, as dh has almost the same implementation to dhe
 	KeyExchangeRotation             bool
 	EncryptionAlgorithm             EncryptionAlgorithm
+	EncryptionAlgorithmBlockMode    EncryptionAlgorithmBlockMode
 	SignatureAlgorithm              SignatureAlgorithm
 	ExtSignatureAlgorithmIdentifier SignatureAlgorithmIdentifier
 	CompressionMethod               CompressionMethod
@@ -318,7 +325,7 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []
 	return decryptedData, nil
 }
 
-func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) ([]byte, error) {
+func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv, seqNum, additionalData []byte) ([]byte, error) {
 	var encryptedMsg []byte
 	var err error
 	switch cipherDef.Spec.EncryptionAlgorithm {
@@ -329,7 +336,7 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv []byte) ([]
 	case EncryptionAlgorithmDES40:
 		encryptedMsg, err = cipherDef.EncryptDesMessage(data, writeKey, iv)
 	case EncryptionAlgorithmAES:
-		encryptedMsg, err = cipherDef.EncryptAESMessage(data, writeKey, iv)
+		encryptedMsg, err = cipherDef.EncryptAESMessage(data, writeKey, iv, seqNum, additionalData)
 	default:
 		return []byte{}, fmt.Errorf("encryption algorithm: %v not implemented", cipherDef.Spec.EncryptionAlgorithm)
 	}
@@ -735,6 +742,7 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 			// "For IVs, it is recommended that implementations restrict support to the length of 96 bits, to promote interoperability, efficiency, and simplicity of design"
 			// https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf?utm_source=chatgpt.com
 			cipherDef.Spec.IvSize = 12
+			cipherDef.Spec.EncryptionAlgorithmBlockMode = EncryptionAlgorithmBlockModeGCM
 		default:
 			fmt.Printf("\n encryption param not implemented %v", param)
 			os.Exit(1)
