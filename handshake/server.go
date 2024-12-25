@@ -34,8 +34,18 @@ type ExtHeartBeat struct {
 
 type ServerDataTLS13 struct {
 	serverHandshakeSecret []byte
+	clientHandshakeSecret []byte
 	deriveSecret          []byte
 	legacyRecordVersion   []byte
+}
+
+type ExtKeyShare struct {
+	clientKey []byte
+}
+
+type ServerDataExt struct {
+	heartBeat *ExtHeartBeat
+	keyShare  ExtKeyShare
 }
 
 type ServerData struct {
@@ -47,6 +57,7 @@ type ServerData struct {
 	Version           []byte
 	HandshakeMessages []byte
 	MasterKey         []byte
+	clientSession     []byte
 	CipherDef         cipher.CipherDef
 	ServerSeqNum      []byte
 	ClientSeqNum      []byte
@@ -55,8 +66,9 @@ type ServerData struct {
 	cert              []byte
 	session           []byte
 	reuseSession      bool
-	extHeartBeat      *ExtHeartBeat
+	extenstions       ServerDataExt
 	tls13             ServerDataTLS13
+	handshakeFinished bool
 }
 
 type HttpServerOptions func(s *HttpServer)
@@ -123,7 +135,9 @@ func (httpServer *HttpServer) startHttpServer() {
 			tls13: ServerDataTLS13{
 				// We will use version specified here in all handshake message in versions prior to tls, for tls 1.3 it will be override to 0x0303 as rfc8446 specified
 				legacyRecordVersion: httpServer.Version,
-			}}
+			},
+			extenstions: ServerDataExt{},
+		}
 
 		if (httpServer.CertParam) != nil {
 

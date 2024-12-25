@@ -3,6 +3,7 @@ package handshake
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"handshakeServer/cipher"
 	"handshakeServer/helpers"
@@ -159,7 +160,7 @@ func (serverData *ServerData) extenstionKeyShare() ([]byte, error) {
 	// THIS key generation should be in cipher
 
 	// THIS secret generation should be in ciper too
-	sharedSecret, _ := curve25519.X25519(privateKey[:], keyShare)
+	sharedSecret, _ := curve25519.X25519(privateKey[:], serverData.extenstions.keyShare.clientKey)
 	serverData.CipherDef.ECDH.SharedSecret = sharedSecret
 	// THIS secret generation should be in ciper too
 
@@ -172,4 +173,99 @@ func (serverData *ServerData) extenstionKeyShare() ([]byte, error) {
 	keyShareEntry = append(keyShareEntry, keyShareEntryKeyExchange...)
 
 	return keyShareEntry, nil
+}
+
+func (serverData *ServerData) extenstionHandleSupportedGroups(data []byte) error {
+	if len(data) < 2 {
+		return fmt.Errorf("data should be at least of length: 2, we got data: %v", data)
+	}
+	supportedGroup := cipher.DhGroupX25519
+	groupsLength := binary.BigEndian.Uint16(data[:2])
+
+	if len(data)-2 != int(groupsLength) {
+		return fmt.Errorf("data should be of lenth: %v, insted we got: %v, data: %v", int(groupsLength), len(data)-2, data[2:])
+	}
+	clientGroups := data[2:]
+	if len(clientGroups)%2 != 0 {
+		return fmt.Errorf("client groups data length should be odd, data we got: %v", data[2:])
+	}
+
+	for i := 0; i < len(clientGroups); i += 2 {
+		group := binary.BigEndian.Uint16(clientGroups[i : i+2])
+		fmt.Println("test group")
+		fmt.Println(group)
+		if _, ok := cipher.SupportedGroups[cipher.DHGroups(group)]; ok {
+			// supportedGroup = cipher.DHGroups(group)
+			serverData.CipherDef.DhParams.Group = &supportedGroup
+			return nil
+		}
+	}
+	return fmt.Errorf("don't support any of the groups passed: %v", clientGroups)
+}
+
+func (serverData *ServerData) extenstionHandleSupportedVersion(data []byte) error {
+	if len(data) < 1 {
+		return fmt.Errorf("data should be at least of length: 1, we got data: %v", data)
+	}
+	dataLen := int(data[0])
+
+	if len(data)-1 != int(dataLen) {
+		return fmt.Errorf("expected the to be of length: %v, got: %v, data: %v", dataLen, len(data)-1, data)
+	}
+
+	content := data[1:]
+
+	if len(content)%2 != 0 {
+		return fmt.Errorf("data length should be odd number, data: %v", data)
+	}
+
+	for i := 0; i < len(content); i += 2 {
+		version := binary.BigEndian.Uint16(content[i : i+2])
+		if _, ok := SupportedVersion[Version(version)]; ok {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("expected supports versions %v, got: %v", SupportedVersion, content)
+}
+
+func (serverData *ServerData) extenstionHandleKeyShare(data []byte) error {
+	if len(data) < 2 {
+		return fmt.Errorf("data should be at least of length: 1, we got data: %v", data)
+	}
+
+	keyShareDataLength := binary.BigEndian.Uint16(data[:2])
+	if len(data)-2 != int(keyShareDataLength) {
+		return fmt.Errorf("data should be of lenth: %v, insted we got: %v, data: %v", int(keyShareDataLength), len(data)-2, data[2:])
+	}
+
+	keyShareData := data[2 : 2+keyShareDataLength]
+
+	if len(keyShareData) < 4 {
+		return fmt.Errorf("key share data  ext should have length of at least 4, 2 for group name, 2 for key exchange length, we got data: %v", keyShareData)
+	}
+
+	groupName := binary.BigEndian.Uint16(keyShareData[:2])
+
+	if _, ok := cipher.SupportedGroups[cipher.DHGroups(groupName)]; !ok {
+		serverData.sendAlertMsg(AlertLevelwarning, AlertDescriptionIllegalParameter)
+		return fmt.Errorf("server doesn't supports: %v group, supported groups: %v", groupName, cipher.SupportedGroups)
+	}
+	//x25519(0x001D) - 19
+	keyExchangeLength := binary.BigEndian.Uint16(keyShareData[2:4])
+
+	if len(keyShareData)-4 != int(keyExchangeLength) {
+		return fmt.Errorf("key exchange should be of lenth: %v, insted we got: %v, data: %v", int(keyExchangeLength), len(keyShareData)-4, keyShareData[4:])
+	}
+
+	keyExchange := keyShareData[4 : 4+keyExchangeLength]
+
+	fmt.Println("alright, we got groupname")
+	fmt.Println(groupName)
+	fmt.Println("and key exchange")
+	fmt.Println(keyExchange)
+
+	serverData.extenstions.keyShare.clientKey = keyExchange
+
+	return nil
 }

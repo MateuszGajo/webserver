@@ -165,6 +165,10 @@ const (
 	DhGroupX25519 DHGroups = 0x001D
 )
 
+var SupportedGroups = map[DHGroups]struct{}{
+	DhGroupX25519: {},
+}
+
 type CompressionMethod byte
 
 const (
@@ -288,7 +292,7 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 	CIPHER_SUITE_SSL_AES_256_GCM_SHA384: "DH_anon_WITH_AES_256-GCM_SHA384",
 }
 
-func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []byte) ([]byte, error) {
+func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv, seqNum, additionalData []byte) ([]byte, error) {
 	if !cipherDef.Spec.IvAsPayload {
 		cipherDef.Keys.IVClient = encryptedData[len(encryptedData)-8:]
 	}
@@ -303,7 +307,7 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv []
 	case EncryptionAlgorithmDES40:
 		decryptedData, err = DecryptDesMessage(encryptedData, writeKey, iv)
 	case EncryptionAlgorithmAES:
-		decryptedData, err = DecryptAESMessage(encryptedData, writeKey, iv)
+		decryptedData, err = cipherDef.DecryptAESMessage(encryptedData, writeKey, iv, seqNum, additionalData)
 	default:
 		return []byte{}, fmt.Errorf("decryption algorithm: %v not implemented", cipherDef.Spec.EncryptionAlgorithm)
 	}
