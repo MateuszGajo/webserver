@@ -107,6 +107,7 @@ type CipherSpec struct {
 	ExportKeyMaterial          int
 	IvSize                     int
 	IvAsPayload                bool
+	IvInEncrypytedMsg          bool
 	HashBasedSigning           bool
 	HashAlgorithm              func() hash.Hash
 	ExtHashAlgorithmIdentifier HashAlgorithmIdentifier
@@ -293,7 +294,8 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 }
 
 func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv, seqNum, additionalData []byte) ([]byte, error) {
-	if !cipherDef.Spec.IvAsPayload {
+	if !cipherDef.Spec.IvAsPayload && cipherDef.Spec.IvInEncrypytedMsg {
+		// Used by tls1.0 & ssl 3.0
 		cipherDef.Keys.IVClient = encryptedData[len(encryptedData)-8:]
 	}
 
@@ -315,6 +317,7 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv, s
 		return nil, err
 	}
 	if cipherDef.Spec.IvAsPayload {
+		// Used by tls1.1, tls 1.2
 		if cipherDef.Spec.IvSize == 0 {
 			return decryptedData, nil
 		}

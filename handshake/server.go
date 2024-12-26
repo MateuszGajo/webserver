@@ -37,6 +37,7 @@ type ServerDataTLS13 struct {
 	clientHandshakeSecret []byte
 	deriveSecret          []byte
 	legacyRecordVersion   []byte
+	masterSecret          []byte
 }
 
 type ExtKeyShare struct {

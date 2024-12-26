@@ -15,11 +15,9 @@ func (cipherDef *CipherDef) DecryptAES(key, iv, ciphertext, seqNum, additionalDa
 	var decodedMsg []byte
 
 	if cipherDef.Spec.EncryptionAlgorithmBlockMode == EncryptionAlgorithmBlockModeGCM {
-		fmt.Println("Decrypt gcm")
 		decodedMsg, err = cipherDef.DecryptGCMBlock(block, ciphertext, iv, seqNum, additionalData)
 	} else {
 		decoded, err := cipherDef.DecryptCBCBlock(block, ciphertext, iv)
-		fmt.Println("Decrypt cbc")
 
 		if err != nil {
 			return nil, err
@@ -53,7 +51,6 @@ func (cipherDef *CipherDef) DecryptGCMBlock(block cipher.Block, ciphertext, iv, 
 
 	SequenceNumberLength := 8
 
-	// Derive per-record nonce
 	perRecordNonce := make([]byte, cipherDef.Spec.IvSize)
 	copy(perRecordNonce[cipherDef.Spec.IvSize-SequenceNumberLength:], sequenceNumber) // Pad to ivLength
 
@@ -66,19 +63,7 @@ func (cipherDef *CipherDef) DecryptGCMBlock(block cipher.Block, ciphertext, iv, 
 		return nil, fmt.Errorf("failed to create GCM: %v", err)
 	}
 
-	fmt.Println("decrypt gcm")
-	fmt.Println("seq num")
-	fmt.Println(sequenceNumber)
-	fmt.Println("per record nonce")
-	fmt.Println(perRecordNonce)
-	fmt.Println("text to decipher")
-	fmt.Println(ciphertext)
-	fmt.Println("additional data")
-	fmt.Println(additionalData)
 	encrypted, err := aesGCM.Open(nil, perRecordNonce, ciphertext, additionalData)
-
-	fmt.Println("Decrypted")
-	fmt.Println(encrypted)
 
 	return encrypted, err
 }
