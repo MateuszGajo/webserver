@@ -633,6 +633,8 @@ func startServer(cert *HttpServerCertParam, version Version) *HttpServer {
 		OpenSSLVersion = "openssl-1.0.2u"
 	} else if version == TLS10Version || version == SSL30Version {
 		OpenSSLVersion = "openssl-0.9.7e"
+	} else if version == TLS13Version {
+		OpenSSLVersion = "openssl-3.0.11"
 	}
 	versionByte := make([]byte, 2)
 	binary.BigEndian.PutUint16(versionByte, uint16(version))
@@ -674,10 +676,18 @@ func runOpensslCommand(args []string) error {
 	cmd := exec.Command("./openssl", cmdArgs...)
 
 	var cipher string
+	var reconnect bool = false
+	var tls13 bool = false
 
 	for i, v := range args {
 		if v == "-cipher" {
 			cipher = args[i+1]
+		}
+		if v == "-reconnect" {
+			reconnect = true
+		}
+		if v == "-tls1_3" {
+			tls13 = true
 		}
 	}
 
@@ -689,12 +699,23 @@ func runOpensslCommand(args []string) error {
 		return fmt.Errorf("Error running openssl command: %v\n, output: %s \n", err, output)
 	}
 
-	if !strings.Contains(string(output), "New, TLSv1/SSLv3, Cipher is "+cipher) {
+	expectedConnectMsgVersion := "TLSv1/SSLv3"
+
+	if tls13 {
+		expectedConnectMsgVersion = "TLSv1.3"
+	}
+
+	fmt.Println(string(output))
+	fmt.Println("New, " + expectedConnectMsgVersion + ", Cipher is " + cipher)
+
+	if !strings.Contains(string(output), "New, "+expectedConnectMsgVersion+", Cipher is "+cipher) {
 		return fmt.Errorf("handshake failed, can't establish new handshake")
 	}
 
-	if !strings.Contains(string(output), "Reused, TLSv1/SSLv3, Cipher is "+cipher) {
-		return fmt.Errorf("handshake failed, cant reused handshake")
+	if reconnect {
+		if !strings.Contains(string(output), "Reused, "+expectedConnectMsgVersion+", Cipher is "+cipher) {
+			return fmt.Errorf("handshake failed, cant reused handshake")
+		}
 	}
 
 	return nil

@@ -1138,7 +1138,7 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 		extData []byte
 	}
 
-	extenstions := []sslExtension{}
+	extensions := []sslExtension{}
 
 	for len(extenstionData) > 0 {
 		if len(extenstionData) < 4 {
@@ -1155,11 +1155,11 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 			extType: extenionType,
 			extData: data,
 		}
-		extenstions = append(extenstions, extData)
+		extensions = append(extensions, extData)
 		extenstionData = extenstionData[4+dataLength:]
 	}
 
-	for _, v := range extenstions {
+	for _, v := range extensions {
 		dataType := v.extType
 		data := v.extData
 		switch dataType {
@@ -1201,6 +1201,7 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 		case 27:
 			// compress_certificate
 		case 35:
+			fmt.Println("session ticket extenstion")
 			// TODO: implement
 			// Sessioc ticket
 			// https://www.rfc-editor.org/rfc/rfc5077.html
@@ -1214,6 +1215,8 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 			}
 
 		case 45:
+			fmt.Println("psk extenstion")
+			fmt.Println(data)
 			//psk_key_exchange_modes
 		case 51:
 			//key_share
@@ -1372,6 +1375,11 @@ func (serverData *ServerData) calculateHandshakeSecret() error {
 	if err != nil {
 		return fmt.Errorf("problem while calculating client encryption keys, err :%v", err)
 	}
+	fmt.Println("calculate handshake secret")
+	fmt.Println("client write key")
+	fmt.Println(serverData.CipherDef.Keys.WriteKeyClient)
+	fmt.Println("client iv")
+	fmt.Println(serverData.CipherDef.Keys.IVClient)
 
 	derivedSecret, err := serverData.DeriveSecret(handshakeSecret, []byte("derived"), []byte(""))
 	if err != nil {
@@ -1385,7 +1393,7 @@ func (serverData *ServerData) calculateHandshakeSecret() error {
 }
 
 func (serverData *ServerData) calculateMasterSecret() {
-	emptyBytes := make([]byte, 48)
+	emptyBytes := make([]byte, serverData.CipherDef.Spec.HashSize)
 	masterSecret := hkdf.Extract(serverData.CipherDef.Spec.HashAlgorithm, emptyBytes, serverData.tls13.deriveSecret)
 
 	serverData.tls13.masterSecret = masterSecret
@@ -1424,6 +1432,12 @@ func (serverData *ServerData) calculateClientMasterSecret() error {
 	if err != nil {
 		return fmt.Errorf("problem while calculating client encryption keys, err :%v", err)
 	}
+
+	fmt.Println("client master secrets")
+	fmt.Println("write key")
+	fmt.Println(serverData.CipherDef.Keys.WriteKeyClient)
+	fmt.Println("iv")
+	fmt.Println(serverData.CipherDef.Keys.IVClient)
 
 	serverData.ClientSeqNum = []byte{0, 0, 0, 0, 0, 0, 0, 0}
 
@@ -1747,6 +1761,7 @@ func (serverData *ServerData) handleHandshakeClientFinished(contentData []byte) 
 
 func (serverData *ServerData) handleHandshakeChangeCipherSpec(contentData []byte) {
 	serverData.ClientSeqNum = []byte{0, 0, 0, 0, 0, 0, 0, 0}
+	serverData.ServerSeqNum = []byte{0, 0, 0, 0, 0, 0, 0, 0}
 
 	serverData.IsClientEncrypted = true
 }

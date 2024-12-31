@@ -74,8 +74,16 @@ Project supports following ciphers of tls1.2:
 * AES128-SHA256
 * AES128-SHA
 
+
+## Supported ciphers tls 1.3
+Project supports following ciphers of tls1.3:
+* TLS_AES_256_GCM_SHA384
+* TLS_AES_128_GCM_SHA256
+* TLS_CHACHA20_POLY1305_SHA256
+
+
 ## Supported features
-* session resumption
+* session resumption (prior to tls 1.3)
 
 ## Supported extensions
 * heart beat

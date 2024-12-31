@@ -56,6 +56,7 @@ const (
 	EncryptionAlgorithmRC4      EncryptionAlgorithm = "RC4"
 	EncryptionAlgorithmRC2      EncryptionAlgorithm = "RC2"
 	EncryptionAlgorithmAES      EncryptionAlgorithm = "AES"
+	EncryptionAlgorithmCHACHA20 EncryptionAlgorithm = "CHACHA20"
 	EncryptionAlgorithmFortezza EncryptionAlgorithm = "FORTEZZA"
 )
 
@@ -289,8 +290,9 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA: "FORTEZZA_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA",
 
 	// TLS 1.3
-	CIPHER_SUITE_SSL_AES_128_GCM_SHA256: "DH_anon_WITH_AES_128-GCM_SHA256",
-	CIPHER_SUITE_SSL_AES_256_GCM_SHA384: "DH_anon_WITH_AES_256-GCM_SHA384",
+	CIPHER_SUITE_SSL_AES_128_GCM_SHA256:       "DH_anon_WITH_AES_128-GCM_SHA256",
+	CIPHER_SUITE_SSL_AES_256_GCM_SHA384:       "DH_anon_WITH_AES_256-GCM_SHA384",
+	CIPHER_SUITE_SSL_CHACHA20_POLY1305_SHA256: "DH_anon_WITH_CHACHA20_POLY1305_SHA256",
 }
 
 func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv, seqNum, additionalData []byte) ([]byte, error) {
@@ -310,6 +312,8 @@ func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv, s
 		decryptedData, err = DecryptDesMessage(encryptedData, writeKey, iv)
 	case EncryptionAlgorithmAES:
 		decryptedData, err = cipherDef.DecryptAESMessage(encryptedData, writeKey, iv, seqNum, additionalData)
+	case EncryptionAlgorithmCHACHA20:
+		decryptedData, err = cipherDef.decryptChacha20(encryptedData, writeKey, iv, seqNum, additionalData)
 	default:
 		return []byte{}, fmt.Errorf("decryption algorithm: %v not implemented", cipherDef.Spec.EncryptionAlgorithm)
 	}
@@ -344,6 +348,8 @@ func (cipherDef *CipherDef) EncryptMessage(data []byte, writeKey, iv, seqNum, ad
 		encryptedMsg, err = cipherDef.EncryptDesMessage(data, writeKey, iv)
 	case EncryptionAlgorithmAES:
 		encryptedMsg, err = cipherDef.EncryptAESMessage(data, writeKey, iv, seqNum, additionalData)
+	case EncryptionAlgorithmCHACHA20:
+		encryptedMsg, err = cipherDef.encryptChacha20(data, writeKey, iv, seqNum, additionalData)
 	default:
 		return []byte{}, fmt.Errorf("encryption algorithm: %v not implemented", cipherDef.Spec.EncryptionAlgorithm)
 	}
@@ -553,6 +559,7 @@ func (cipherDef *CipherDef) VerifySignedData(hash, signature []byte) error {
 var serverCipherPreferences = []TLSCipherSuite{
 	CIPHER_SUITE_SSL_AES_256_GCM_SHA384,
 	CIPHER_SUITE_SSL_AES_128_GCM_SHA256,
+	CIPHER_SUITE_SSL_CHACHA20_POLY1305_SHA256,
 	CIPHER_SUITE_SSL_FORTEZZA_KEA_WITH_FORTEZZA_CBC_SHA,
 	CIPHER_SUITE_SSL_DHE_DSS_WITH_AES_256_CBC_SHA256,
 	CIPHER_SUITE_SSL_DHE_RSA_WITH_AES_256_CBC_SHA256,
@@ -727,6 +734,7 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 		cipherDef.Spec.IvSize = 8
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmRC2
 	case "AES":
+	case "CHACHA20":
 		// Just for sake not backward compability breaking
 	default:
 		fmt.Printf("\n encryption algorithm not implemented: %v", encryptionAlgorithm)
@@ -750,6 +758,10 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 			// https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf?utm_source=chatgpt.com
 			cipherDef.Spec.IvSize = 12
 			cipherDef.Spec.EncryptionAlgorithmBlockMode = EncryptionAlgorithmBlockModeGCM
+		case "POLY1305":
+			// "For IVs, it is recommended that implementations restrict support to the length of 96 bits, to promote interoperability, efficiency, and simplicity of design"
+			// https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf?utm_source=chatgpt.com
+			cipherDef.Spec.IvSize = 12
 		default:
 			fmt.Printf("\n encryption param not implemented %v", param)
 			os.Exit(1)
@@ -778,6 +790,9 @@ func (cipherDef *CipherDef) GetCipherSpecInfo() error {
 	case "AES_256_GCM":
 		cipherDef.Spec.KeyMaterial = 32
 		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmAES
+	case "CHACHA20_POLY1305":
+		cipherDef.Spec.KeyMaterial = 32
+		cipherDef.Spec.EncryptionAlgorithm = EncryptionAlgorithmCHACHA20
 	case "AES_256_CBC":
 		cipherDef.Spec.IvSize = 16
 		cipherDef.Spec.KeyMaterial = 32
