@@ -4,25 +4,19 @@ import (
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha1"
-	"handshakeServer/cipher"
 	"handshakeServer/helpers"
 	"hash"
 )
 
-func (serverData *ServerData) T1GenerateFinishedHandshakeMac(label []byte, handshakeMessages [][]byte) []byte {
+func (serverData *ServerData) T1GenerateFinishedHandshakeMac(label []byte, handshakeMessages []byte) []byte {
 	// TODO: tls 1.0 implement this
 	// Legacy thing with fixed number of 48 bytes
-	allHandskaedMessageCombined := []byte{}
-
-	for _, v := range handshakeMessages {
-		allHandskaedMessageCombined = append(allHandskaedMessageCombined, v...)
-	}
 
 	md5 := md5.New()
 	sha := sha1.New()
 
-	md5.Write(allHandskaedMessageCombined)
-	sha.Write(allHandskaedMessageCombined)
+	md5.Write(handshakeMessages)
+	sha.Write(handshakeMessages)
 	md5Hash := md5.Sum(nil)
 	shaHash := sha.Sum(nil)
 
@@ -101,16 +95,7 @@ func (serverData *ServerData) T1GenerateStreamCipher(dataCompressedType, sslComp
 	// HMAC_hash(MAC_write_secret, seq_num + TLSCompressed.type +
 	// 	TLSCompressed.version + TLSCompressed.length +
 	// 	TLSCompressed.fragment));
-	var hashFunc hash.Hash
-
-	switch serverData.CipherDef.Spec.HashAlgorithm {
-	case cipher.HashAlgorithmMD5:
-		hashFunc = hmac.New(md5.New, mac)
-	case cipher.HashAlgorithmSHA:
-		hashFunc = hmac.New(sha1.New, mac)
-	default:
-		panic("wrong algorithm used can't use: " + serverData.CipherDef.Spec.HashAlgorithm)
-	}
+	var hashFunc = serverData.CipherDef.Spec.HashAlgorithm()
 
 	sslCompressLength := helpers.Int32ToBigEndian(len(sslCompressData))
 

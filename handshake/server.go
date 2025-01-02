@@ -32,6 +32,23 @@ type ExtHeartBeat struct {
 	lastPayload []byte
 }
 
+type ServerDataTLS13 struct {
+	serverHandshakeSecret []byte
+	clientHandshakeSecret []byte
+	deriveSecret          []byte
+	legacyRecordVersion   []byte
+	masterSecret          []byte
+}
+
+type ExtKeyShare struct {
+	clientKey []byte
+}
+
+type ServerDataExt struct {
+	heartBeat *ExtHeartBeat
+	keyShare  ExtKeyShare
+}
+
 type ServerData struct {
 	IsClientEncrypted bool
 	IsServerEncrypted bool
@@ -39,8 +56,9 @@ type ServerData struct {
 	ClientRandom      []byte
 	ServerRandom      []byte
 	Version           []byte
-	HandshakeMessages [][]byte
+	HandshakeMessages []byte
 	MasterKey         []byte
+	clientSession     []byte
 	CipherDef         cipher.CipherDef
 	ServerSeqNum      []byte
 	ClientSeqNum      []byte
@@ -49,7 +67,9 @@ type ServerData struct {
 	cert              []byte
 	session           []byte
 	reuseSession      bool
-	extHeartBeat      *ExtHeartBeat
+	extenstions       ServerDataExt
+	tls13             ServerDataTLS13
+	handshakeFinished bool
 }
 
 type HttpServerOptions func(s *HttpServer)
@@ -112,7 +132,13 @@ func (httpServer *HttpServer) startHttpServer() {
 	defer httpServer.Wg.Done()
 	for {
 
-		serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, Version: httpServer.Version, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: cipher.CipherDef{}}
+		serverData := ServerData{ServerSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, Version: httpServer.Version, ClientSeqNum: []byte{0, 0, 0, 0, 0, 0, 0, 0}, CipherDef: cipher.CipherDef{},
+			tls13: ServerDataTLS13{
+				// We will use version specified here in all handshake message in versions prior to tls, for tls 1.3 it will be override to 0x0303 as rfc8446 specified
+				legacyRecordVersion: httpServer.Version,
+			},
+			extenstions: ServerDataExt{},
+		}
 
 		if (httpServer.CertParam) != nil {
 
@@ -192,6 +218,9 @@ Loop:
 				fmt.Printf("\n parser error: %v", err)
 				serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 			}
+
+			fmt.Println("incoming msg")
+			fmt.Println(msg)
 
 			for _, msg := range msgs {
 				err := handleMessage(msg, serverData)
