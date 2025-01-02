@@ -164,7 +164,7 @@ func (serverData *ServerData) T12GenerateStreamCipher(dataCompressedType, sslCom
 	// HMAC_hash(MAC_write_secret, seq_num + TLSCompressed.type +
 	// 	TLSCompressed.version + TLSCompressed.length +
 	// 	TLSCompressed.fragment));
-	var hashFunc = serverData.CipherDef.Spec.HashAlgorithm()
+	var hashFunc = hmac.New(serverData.CipherDef.Spec.HashAlgorithm, mac)
 
 	sslCompressLength := helpers.Int32ToBigEndian(len(sslCompressData))
 

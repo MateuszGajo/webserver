@@ -3,12 +3,12 @@
 PROJECT IN DEVELOPMENT PHASE! Don't use in production.
 
 # How to run project
-1. Download openssl, for testing older version use e.g 0.9.7e
+1. Download openssl
 2. Extract data
 3. Create certificate (rsa, dss, rsa/dh) if needed, remeber some cipher suites needs to be created with weak key, look at #Certificates section
 4. Run project using `go run .` or  `go run . -cert <cert path> -key <key path>` if using a certificate
 5. Connect openssl to the server using `./openssl s_client -connect 127.0.0.1:4221 -<version> -cipher <cipher>`
-6. If everything went successfully you should see handshake details information, look for `New, TLSv1/SSLv3, Cipher is`
+6. If everything went successfully you should see handshake details information, look for `New, <version>, Cipher is`
 
 
 # How to run test
@@ -19,56 +19,15 @@ PROJECT IN DEVELOPMENT PHASE! Don't use in production.
 
 
 # ciphers
-## Supported ciphers ssl 3.0
-Project supports following ciphers of ssl 3.0 (based on rfc 6101):
-* EDH-DSS-DES-CBC3-SHA
-* EDH-RSA-DES-CBC3-SHA
-* DES-CBC3-SHA
-* ADH-DES-CBC3-SHA
-* EDH-RSA-DES-CBC-SHA
-* RC4-SHA
-* RC4-MD5 
-* ADH-RC4-MD5
-Other ciphers can work but hasn't been tested yet.
-
-*All fortezza ciphers are not implemented in ssl 3.0.
-
-## Supported ciphers tls 1.0
-Project supports following ciphers of tls1.0 (based on rfc 2246):
-* ADH-DES-CBC3-SHA
-* ADH-RC4-MD5
-* DES-CBC3-SHA
-* RC4-SHA
-* EDH-DSS-DES-CBC3-SHA
-* EDH-RSA-DES-CBC3-SHA
-
-## Supported ciphers tls 1.1
-Project supports following ciphers of tls1.1:
-* ADH-DES-CBC3-SHA
-* ADH-RC4-MD5
-* DES-CBC3-SHA
-* RC4-SHA
-* EDH-DSS-DES-CBC3-SHA
-* EDH-RSA-DES-CBC3-SHA
 
 ## Supported ciphers tls 1.2
 Project supports following ciphers of tls1.2:
-* ADH-DES-CBC3-SHA
-* ADH-RC4-MD5
 * ADH-AES-SHA
 * ADH-AES-SHA256
-* DES-CBC3-SHA
-* RC4-SHA
-* EDH-DSS-DES-CBC3-SHA
-* EDH-RSA-DES-CBC3-SHA
 * DHE-RSA-AES256-SHA
 * DHE-RSA-AES256-SHA
 * DHE-RSA-AES128-SHA256
 * DHE-RSA-AES256-SHA256
-* DH-RSA-AES256-SHA256
-* DH-DSS-AES256-SHA256
-* DHE-DSS-AES256-SHA256
-* DHE-DSS-AES256-SHA
 * AES256-SHA256
 * AES256-SHA
 * AES128-SHA256

@@ -22,6 +22,7 @@ const (
 	ExtenstionTypeSupportedGroups   ExtenstionType = 10
 	ExtenstionTypeSupportedVersions ExtenstionType = 43
 	ExtenstionTypeKeyShare          ExtenstionType = 51
+	ExtenstionTypeRenegotiationInfo ExtenstionType = 65281
 )
 
 func (serverData *ServerData) ConstructExtenstion(extType ExtenstionType) ([]byte, error) {
@@ -34,6 +35,8 @@ func (serverData *ServerData) ConstructExtenstion(extType ExtenstionType) ([]byt
 		extData, err = serverData.extenstionKeyShare()
 	case ExtenstionTypeSupportedVersions:
 		extData, err = serverData.extenstionSupportedVersions()
+	case ExtenstionTypeRenegotiationInfo:
+		extData, err = serverData.extenstionRenegotiationInfo()
 	default:
 		return nil, fmt.Errorf("extenstion %v not implement", extType)
 	}
@@ -173,6 +176,13 @@ func (serverData *ServerData) extenstionKeyShare() ([]byte, error) {
 	keyShareEntry = append(keyShareEntry, keyShareEntryKeyExchange...)
 
 	return keyShareEntry, nil
+}
+
+func (serverData *ServerData) extenstionRenegotiationInfo() ([]byte, error) {
+
+	data := []byte{byte(0)}
+
+	return data, nil
 }
 
 func (serverData *ServerData) extenstionHandleSupportedGroups(data []byte) error {

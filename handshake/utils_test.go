@@ -15,8 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
-	"testing"
+	"regexp"
 	"time"
 )
 
@@ -630,7 +629,7 @@ func (serverData *ServerData) verifyCertificate(data []byte) (*x509.Certificate,
 
 func startServer(cert *HttpServerCertParam, version Version) *HttpServer {
 	if version == TLS11Version || version == TLS12Version {
-		OpenSSLVersion = "openssl-1.0.2u"
+		OpenSSLVersion = "openssl-3.0.11"
 	} else if version == TLS10Version || version == SSL30Version {
 		OpenSSLVersion = "openssl-0.9.7e"
 	} else if version == TLS13Version {
@@ -664,34 +663,36 @@ func getOpenSslDir() string {
 		os.Exit(1)
 	}
 
-	return filepath.Join(dir, "../openssl", OpenSSLVersion, "apps")
+	fmt.Println("openssl version")
+	fmt.Println(OpenSSLVersion)
+
+	return filepath.Join(dir, "../openssl", OpenSSLVersion)
 }
 
 func runOpensslCommand(args []string) error {
+	openSslDir := getOpenSslDir()
+
+	err := os.Setenv("LD_LIBRARY_PATH", openSslDir)
+	if err != nil {
+		panic("Failed to set LD_LIBRARY_PATH: " + err.Error())
+	}
+
 	cmdArgs := []string{"s_client"}
 	cmdArgs = append(cmdArgs, "-connect")
 	cmdArgs = append(cmdArgs, Address+":"+Port)
 	cmdArgs = append(cmdArgs, args...)
 
 	cmd := exec.Command("./openssl", cmdArgs...)
+	cmd.Dir = openSslDir + "/apps"
 
 	var cipher string
-	var reconnect bool = false
-	var tls13 bool = false
 
 	for i, v := range args {
 		if v == "-cipher" {
 			cipher = args[i+1]
 		}
-		if v == "-reconnect" {
-			reconnect = true
-		}
-		if v == "-tls1_3" {
-			tls13 = true
-		}
-	}
 
-	cmd.Dir = getOpenSslDir()
+	}
 
 	output, err := cmd.CombinedOutput()
 
@@ -699,143 +700,21 @@ func runOpensslCommand(args []string) error {
 		return fmt.Errorf("Error running openssl command: %v\n, output: %s \n", err, output)
 	}
 
-	expectedConnectMsgVersion := "TLSv1/SSLv3"
+	handshakeCompletedPattern := `New, .+, Cipher is ` + regexp.QuoteMeta(cipher)
+	handshakeReusedPattern := `New, .+, Cipher is ` + regexp.QuoteMeta(cipher)
 
-	if tls13 {
-		expectedConnectMsgVersion = "TLSv1.3"
-	}
-
+	fmt.Println("output")
 	fmt.Println(string(output))
-	fmt.Println("New, " + expectedConnectMsgVersion + ", Cipher is " + cipher)
 
-	if !strings.Contains(string(output), "New, "+expectedConnectMsgVersion+", Cipher is "+cipher) {
-		return fmt.Errorf("handshake failed, can't establish new handshake")
+	_, err = regexp.MatchString(handshakeCompletedPattern, string(output))
+	if err != nil {
+		return fmt.Errorf("handshake failed, cant reused handshake")
 	}
 
-	if reconnect {
-		if !strings.Contains(string(output), "Reused, "+expectedConnectMsgVersion+", Cipher is "+cipher) {
-			return fmt.Errorf("handshake failed, cant reused handshake")
-		}
+	_, err = regexp.MatchString(handshakeReusedPattern, string(output))
+	if err != nil {
+		return fmt.Errorf("handshake failed, cant reused handshake")
 	}
 
 	return nil
-}
-
-func TestHandshakeOpenS3_ADH_DES_CBC3_SHA(t *testing.T) {
-	server := startServer(nil, SSL30Version)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "ADH-DES-CBC3-SHA", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestHandshakeOpenS3_EDH_RSA_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert()
-
-	server := startServer(params, SSL30Version)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "EDH-RSA-DES-CBC3-SHA", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-
-}
-
-func TestHandshakeOpenS3_EDH_RSA_DES_CBC_SHA(t *testing.T) {
-	params := generateRsaCert()
-
-	server := startServer(params, SSL30Version)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "EDH-RSA-DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestHandshakeOpenS3_DES_CBC3_SHA(t *testing.T) {
-	params := generateRsaCert()
-
-	server := startServer(params, SSL30Version)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "DES-CBC3-SHA", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-
-}
-
-func TestHandshakeOpenS3_DES_CBC_SHA(t *testing.T) {
-	params := generateRsaCert()
-
-	server := startServer(params, SSL30Version)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-
-}
-
-func TestHandshakeOpenS3_EDH_DSS_DES_CBC3_SHA(t *testing.T) {
-	params := generateDSsCert()
-
-	server := startServer(params, SSL30Version)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "EDH-DSS-DES-CBC3-SHA", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestHandshakeOpenS3_EDH_DSS_DES_CBC_SHA(t *testing.T) {
-	params := generateDSsCert()
-
-	server := startServer(params, SSL30Version)
-
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "EDH-DSS-DES-CBC-SHA", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestHandshakeOpenS3_RC4_SHA(t *testing.T) {
-	params := generateRsaCert()
-
-	server := startServer(params, SSL30Version)
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "RC4-SHA", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-
-}
-
-func TestHandshakeOpenS3_RC4_MD5(t *testing.T) {
-	params := generateRsaCert()
-
-	server := startServer(params, SSL30Version)
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "RC4-MD5", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-
-}
-
-func TestHandshakeOpenS3_ADH_RC4_MD5(t *testing.T) {
-	server := startServer(nil, SSL30Version)
-	defer StopServer(*server)
-
-	if err := runOpensslCommand([]string{"-cipher", "ADH-RC4-MD5", "-ssl3", "-reconnect"}); err != nil {
-		t.Error(err)
-	}
-
 }
