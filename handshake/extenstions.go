@@ -270,11 +270,6 @@ func (serverData *ServerData) extenstionHandleKeyShare(data []byte) error {
 
 	keyExchange := keyShareData[4 : 4+keyExchangeLength]
 
-	fmt.Println("alright, we got groupname")
-	fmt.Println(groupName)
-	fmt.Println("and key exchange")
-	fmt.Println(keyExchange)
-
 	serverData.extenstions.keyShare.clientKey = keyExchange
 
 	return nil

@@ -95,20 +95,12 @@ const (
 	SignatureAlgorithmNumberECDSA     SignatureAlgorithmIdentifier = 3
 )
 
-type PaddingType string
-
-const (
-	LengthPaddingType PaddingType = "lengthPadding"
-	ZerosPaddingType  PaddingType = "zerosPadding"
-)
-
 type CipherSpec struct {
 	HashSize                   int
 	KeyMaterial                int
 	ExportKeyMaterial          int
 	IvSize                     int
 	IvAsPayload                bool
-	IvInEncrypytedMsg          bool
 	HashBasedSigning           bool
 	HashAlgorithm              func() hash.Hash
 	ExtHashAlgorithmIdentifier HashAlgorithmIdentifier
@@ -121,7 +113,6 @@ type CipherSpec struct {
 	ExtSignatureAlgorithmIdentifier SignatureAlgorithmIdentifier
 	CompressionMethod               CompressionMethod
 	IsExportable                    bool
-	PaddingType                     PaddingType
 }
 
 type CipherDef struct {
@@ -296,10 +287,6 @@ var CIPHER_SUITE_NAME = map[TLSCipherSuite]string{
 }
 
 func (cipherDef *CipherDef) DecryptMessage(encryptedData []byte, writeKey, iv, seqNum, additionalData []byte) ([]byte, error) {
-	if !cipherDef.Spec.IvAsPayload && cipherDef.Spec.IvInEncrypytedMsg {
-		// Used by tls1.0 & ssl 3.0
-		cipherDef.Keys.IVClient = encryptedData[len(encryptedData)-8:]
-	}
 
 	var decryptedData []byte
 	var err error
@@ -672,15 +659,8 @@ func LengthPadding(src []byte, blockSize int) []byte {
 }
 
 func (cipherDef *CipherDef) addPadding(src []byte, blockSize int) []byte {
-	switch cipherDef.Spec.PaddingType {
-	case LengthPaddingType:
-		return LengthPadding(src, blockSize)
-	case ZerosPaddingType:
-		return zerosPadding(src, blockSize)
-	}
-	fmt.Println("Should never enter this state in addPadding")
-	os.Exit(1)
-	return []byte{}
+
+	return LengthPadding(src, blockSize)
 }
 
 func (cipherDef *CipherDef) GetCipherSpecInfo() error {

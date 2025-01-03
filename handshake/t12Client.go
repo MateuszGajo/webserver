@@ -3,6 +3,7 @@ package handshake
 import (
 	"crypto/hmac"
 	"crypto/md5"
+	"crypto/rand"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -102,10 +103,7 @@ func (serverData *ServerData) T12GenerateFinishedHandshakeMac(label []byte, hand
 	sha256Func.Write(handshakeMessages)
 	sha256Hash := sha256Func.Sum(nil)
 
-	seed := label
-	seed = append(seed, sha256Hash...)
-
-	verifyData := T12Prf(serverData.MasterKey, seed, defaultVerifyDataLength)
+	verifyData := T12Prf(serverData.MasterKey, sha256Hash, label, defaultVerifyDataLength)
 
 	return verifyData
 }
@@ -146,9 +144,12 @@ func T12PHash(hash func() hash.Hash, secret, seed []byte, length int) []byte {
 	// return sum
 }
 
-func T12Prf(secret, seed []byte, req_len int) []byte {
+func T12Prf(secret, seed, label []byte, req_len int) []byte {
 
-	return T12PHash(sha256.New, secret, seed, req_len)[:req_len]
+	seedExtended := label
+	seedExtended = append(seedExtended, seed...)
+
+	return T12PHash(sha256.New, secret, seedExtended, req_len)[:req_len]
 
 }
 
@@ -175,4 +176,60 @@ func (serverData *ServerData) T12GenerateStreamCipher(dataCompressedType, sslCom
 	hashFunc.Write(sslCompressData)
 
 	return hashFunc.Sum(nil)
+}
+
+func (serverData *ServerData) T12RecordLayerMacEncryption(data []byte, contentData ContentType) (ContentType, []byte, error) {
+	mac := serverData.T12GenerateStreamCipher([]byte{byte(contentData)}, data, serverData.ServerSeqNum, serverData.CipherDef.Keys.MacServer)
+	// Iv is a pseudo-random function used along with key to add randomness to encryption proces. The IV ensure if the same plaintext is encrypted multiple time with the same key, the result is different
+	// Why iv is inside message?
+	// Iv used to be taken from last msg, attacker that has access to plaintext of message can send request and with a use of reverse engineering deduce content of the message.
+	// For example, Alice's ciphertext-block-1 (aC1) is result of Alice's PlainText-block-1 (aP1) being XORed with the iv generate for the encryptioin
+	// ac1=e(ao1 xor aiv)
+	// If the eavesdropper (Eve) can predict the IV to be used for her encryption (eIV) then she can choose plaintext such the Eve's Plaintext-Block-1(eP1)
+	// eP1=aIv xor eIV xor PG1
+	// Wher PG1 is Plaintext-guess-Block-1 which is what Eve is guessing for the value of aP1. This allows a dirt trick to be played in the calculation of Eve's ciphertext-block01(ec1)
+	// ec1 = e(ep1 xor eiv)
+	// ec1 = e(aiv xor eiv xor pg1 xor eiv)
+	// ec1 - e(aiv xor pg1)
+	// Therefore if Eve's plainText-Guess block-1 is a match for Alice plaintext-block1 then ec1=Ac1
+	// Now you might be thinking that for AES which has a 128-bit block size that Eve will still have her work cut out for herself as there is a huge range of possibilities for plaintext values. You would be right as a guess has a 1 in 2^128 (3.40282366921e38) chance of being right; however, that can be wittled down further as language is not random, not all bytes map to printable characters, context matters, and the protocol might have additional features that can be leveraged.
+	// source: https://derekwill.com/2021/01/01/aes-cbc-mode-chosen-plaintext-attack/
+	dataWithMac := []byte{}
+	if serverData.CipherDef.Spec.IvAsPayload {
+		Iv := make([]byte, serverData.CipherDef.Spec.IvSize)
+		_, err := rand.Read(Iv)
+		if err != nil {
+			return 0, nil, fmt.Errorf("can't generate iv, err: %v", err)
+		}
+		dataWithMac = Iv
+	}
+	dataWithMac = append(dataWithMac, data...)
+	dataWithMac = append(dataWithMac, mac...)
+
+	encryptedMsg, err := serverData.CipherDef.EncryptMessage(dataWithMac, serverData.CipherDef.Keys.WriteKeyServer, serverData.CipherDef.Keys.IVServer, serverData.ServerSeqNum, nil)
+
+	if err != nil {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionBadRecordMac)
+		return 0, nil, err
+	}
+
+	return contentData, encryptedMsg, nil
+}
+
+func (serverData *ServerData) T12DecryptData(dataContent []byte, contentType byte) (byte, []byte, error) {
+	decryptedClientData, err := serverData.CipherDef.DecryptMessage(dataContent, serverData.CipherDef.Keys.WriteKeyClient, serverData.CipherDef.Keys.IVClient, serverData.ClientSeqNum, []byte{})
+
+	if err != nil {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionDecryptionFailed)
+		return 0, nil, fmt.Errorf("\n Decryption failed: %v", err)
+	}
+
+	dataWithoutMac, err := serverData.verifyMac(contentType, decryptedClientData)
+
+	if err != nil {
+		serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionBadRecordMac)
+		return 0, nil, fmt.Errorf("\n eror with verify mac, err: %v", err)
+	}
+
+	return contentType, dataWithoutMac, nil
 }

@@ -1,6 +1,7 @@
 package handshake
 
 import (
+	"encoding/binary"
 	"fmt"
 	"handshakeServer/cipher"
 	"io"
@@ -69,7 +70,9 @@ type ServerData struct {
 	reuseSession      bool
 	extenstions       ServerDataExt
 	tls13             ServerDataTLS13
-	handshakeFinished bool
+	handleHandshake   func(contentData []byte) error
+	macAndEncryptData func(data []byte, contentData ContentType) (ContentType, []byte, error)
+	decryptData       func(dataContent []byte, contentType byte) (byte, []byte, error)
 }
 
 type HttpServerOptions func(s *HttpServer)
@@ -138,6 +141,17 @@ func (httpServer *HttpServer) startHttpServer() {
 				legacyRecordVersion: httpServer.Version,
 			},
 			extenstions: ServerDataExt{},
+		}
+
+		if binary.BigEndian.Uint16(serverData.Version) == 0x0304 {
+			serverData.handleHandshake = serverData.handleHandshakeTls13
+			serverData.macAndEncryptData = serverData.T13RecordLayerMacEncryption
+			serverData.decryptData = serverData.T13DecryptData
+
+		} else if binary.BigEndian.Uint16(serverData.Version) == 0x0303 {
+			serverData.handleHandshake = serverData.handleHandshakeSsl30
+			serverData.macAndEncryptData = serverData.T12RecordLayerMacEncryption
+			serverData.decryptData = serverData.T12DecryptData
 		}
 
 		if (httpServer.CertParam) != nil {
@@ -218,9 +232,6 @@ Loop:
 				fmt.Printf("\n parser error: %v", err)
 				serverData.sendAlertMsg(AlertLevelfatal, AlertDescriptionHandshakeFailure)
 			}
-
-			fmt.Println("incoming msg")
-			fmt.Println(msg)
 
 			for _, msg := range msgs {
 				err := handleMessage(msg, serverData)
