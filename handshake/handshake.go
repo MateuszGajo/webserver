@@ -14,6 +14,7 @@ import (
 
 	"handshakeServer/cipher"
 	"handshakeServer/helpers"
+	"handshakeServer/httpServer"
 
 	"golang.org/x/crypto/hkdf"
 )
@@ -270,7 +271,9 @@ func handleMessage(clientData []byte, serverData *ServerData) error {
 		serverData.handleHandshakeChangeCipherSpec(dataContent)
 
 	} else if contentType == byte(ContentTypeApplicationData) {
-		HttpHandler(dataContent)
+		data := httpServer.HttpHandler(dataContent)
+		serverData.BuffSendData(ContentTypeApplicationData, data)
+		serverData.sendData(serverData.wBuff)
 	} else if contentType == byte(ContentTypeHeartBeat) {
 
 		if err := serverData.handleHeartBeat(dataContent); err != nil {
@@ -606,6 +609,9 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 	contentType := contentData
 	content := data
 
+	fmt.Println("raw data")
+	fmt.Println(content)
+
 	if serverData.IsServerEncrypted && contentData != ContentTypeChangeCipherSpec {
 		var err error
 
@@ -631,6 +637,8 @@ func (serverData *ServerData) BuffSendData(contentData ContentType, data []byte)
 	msg = append(msg, content...)
 
 	serverData.wBuff = append(serverData.wBuff, msg...)
+	fmt.Println("encrypted data")
+	fmt.Println(serverData.wBuff)
 
 	return nil
 }
@@ -1113,6 +1121,12 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 		dataType := v.extType
 		data := v.extData
 		switch dataType {
+		case 0:
+			fmt.Println("server name")
+			fmt.Println(string(data))
+		case 5:
+			fmt.Println("status reques")
+			fmt.Println(data)
 		case 10:
 			// supported groups
 			err := serverData.extenstionHandleSupportedGroups(data)
@@ -1144,6 +1158,15 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 			if HeartBeatMode(data[0]) == HeartBeatPeerAllowedToSendMode {
 				serverData.extenstions.heartBeat = &ExtHeartBeat{}
 			}
+		case 16:
+			fmt.Println("application layer protocol negotation")
+			fmt.Println(data)
+		case 18:
+			fmt.Println("signed certificate timestamp")
+			fmt.Println(data)
+		case 21:
+			fmt.Println("padding")
+			fmt.Println(data)
 		case 22:
 			// encrypt_then_mac
 		case 23:
@@ -1167,6 +1190,10 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 		case 45:
 			fmt.Println("psk extenstion")
 			fmt.Println(data)
+			//psk_key_exchange_mode
+		case 49:
+			fmt.Println("post handshake auth")
+			fmt.Println(data)
 			//psk_key_exchange_modes
 		case 51:
 			//key_share
@@ -1181,7 +1208,9 @@ func (serverData *ServerData) handleHandshakeClientHello(contentData []byte) err
 			if err != nil {
 				return err
 			}
-
+		case 65281:
+			fmt.Println("renegotitation info")
+			fmt.Println(data)
 		default:
 			return fmt.Errorf("unknown extenstion type: %v", dataType)
 		}

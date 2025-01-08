@@ -15,6 +15,8 @@ func (serverData *ServerData) T13RecordLayerMacEncryption(data []byte, contentDa
 	if contentData == ContentTypeHandshake {
 		data = append(data, byte(22))
 		contentData = ContentTypeApplicationData
+	} else if contentData == ContentTypeApplicationData {
+		data = append(data, byte(23))
 	}
 
 	AdditionalDataOverHead := 16 // Probably should not be hardcoded
