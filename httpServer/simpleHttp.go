@@ -1,19 +1,33 @@
 package httpServer
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 )
 
-// mime specify yhe nature of files being trasnmited
-// Content-Type: text/html
+type httpServer struct {
+	httpVersion int
+}
 
-func parseData(data []byte) error {
-	fmt.Println("lets parse")
-	fmt.Println(data)
-	fmt.Println("length of data")
-	fmt.Println(len(data))
+func parseBody(contentType string, data []byte) error {
+	switch string(contentType) {
+	case "application/json":
+		{
+			var result map[string]interface{}
+
+			err := json.Unmarshal(data, &result)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (server httpServer) parseData(data []byte) error {
 
 	headers := make(map[string]string)
 
@@ -30,8 +44,8 @@ func parseData(data []byte) error {
 	if len(reqInfoDetails) < 3 {
 		return fmt.Errorf("request should contain req method, req path, req protocol at least, we got: %v", string(reqInfo))
 	}
-	reqMethod := reqInfoDetails[0]
-	reqPath := reqInfoDetails[1]
+	// reqMethod := reqInfoDetails[0]
+	// reqPath := reqInfoDetails[1]
 	reqProtocol := reqInfoDetails[2]
 
 	startLineIndx := 0
@@ -64,47 +78,45 @@ func parseData(data []byte) error {
 			return fmt.Errorf("incorrect length of data, expected length of: %v, got: %v", startLineIndx+valNum, len(data))
 		}
 		body = data[startLineIndx : startLineIndx+valNum]
+
+		val, ok := headers["Content-Type"]
+
+		if !ok {
+			panic("not ok")
+		}
+
+		parseBody(val, body)
 	}
 
-	fmt.Println("haloooo")
-	fmt.Println("start indx")
-	fmt.Println(startLineIndx)
-	// headers := line[1:]
-	fmt.Println("request info")
-	fmt.Println(reqInfo)
-	fmt.Println("method")
-	fmt.Println(reqMethod)
-	fmt.Println("path")
-	fmt.Println(reqPath)
-	fmt.Println("protocol")
-	fmt.Println(reqProtocol)
-	fmt.Println("headers")
-	fmt.Println(headers)
-
-	fmt.Println("body")
-	fmt.Println(string(body))
-
-	//
-	//	for _, v := range line {
-	//		fmt.Println("line")
-	//		fmt.Println(string(v))
-	//	}
+	httpVersion, err := strconv.Atoi(string(reqProtocol[5]) + string(reqProtocol[7]))
+	if err != nil {
+		return fmt.Errorf("problem converting http version to number, err: %v", err)
+	}
+	if httpVersion > server.httpVersion {
+		return fmt.Errorf("newest supported version is: %v", server.httpVersion)
+	}
 
 	return nil
 }
 
 func HttpHandler(data []byte) []byte {
-	fmt.Println("``````````````````````````````````````")
-	fmt.Println("``````````````````````````````````````")
-	fmt.Println("``````````````````````````````````````")
-	fmt.Println("APPLICATION DATA")
-	fmt.Println(string(data))
-	fmt.Println("APPLICATION DATA")
-	fmt.Println("``````````````````````````````````````")
-	fmt.Println("``````````````````````````````````````")
-	fmt.Println("``````````````````````````````````````")
-	parseData(data)
+	server := httpServer{
+		httpVersion: 11,
+	}
+	server.parseData(data)
 
-	return []byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 4\r\nDate: Fri, 03 Jan 2025 12:34:56 GMT\r\n\r\nabcd")
+	httpVersion := "HTTP/" + string(strconv.Itoa(server.httpVersion)[0]) + "." + string(strconv.Itoa(server.httpVersion)[1])
+	responseCode := "200"
+	responseStatus := "OK"
+	reqInfo := httpVersion + " " + responseCode + " " + responseStatus + "\r\n"
+	headers := "Content-Type: text/plain; charset=utf-8\r\nContent-Length: 4\r\nDate: Fri, 03 Jan 2025 12:34:56 GMT\r\n\r\n"
+	datares := "abcd"
+
+	response := reqInfo + headers + datares
+
+	fmt.Println("response")
+	fmt.Println(response)
+
+	return []byte(response)
 
 }
